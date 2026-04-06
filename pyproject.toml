@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docgap"
+version = "0.1.6"
+description = "FreeBSD Documentation Gap Detector - monitors commits and generates documentation patches using local LLM"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "BSD-2-Clause"}
+authors = [
+    {name = "Edson Brandi", email = "ebrandi@FreeBSD.org"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: POSIX :: BSD :: FreeBSD",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Documentation",
+    "Topic :: Software Development :: Documentation",
+]
+dependencies = [
+    "pyyaml>=6.0",
+    "requests>=2.31.0",
+    "click>=8.0",
+]
+
+[project.scripts]
+docgap = "docgap.cli.main:main"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.data-files]
+"share/man/man1" = ["man/docgap.1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --cov=docgap --cov-report=term-missing --cov-report=html"
+timeout = 30
+markers = [
+    "integration: tests requiring real external resources (freebsd repos, Ollama)",
+]
+
+[tool.coverage.run]
+source = ["src/docgap"]
+omit = [
+    "*/__pycache__/*",
+    "*/tests/*",
+    "*/vendor/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"

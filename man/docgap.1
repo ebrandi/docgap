@@ -1,0 +1,869 @@
+.Dd April 6, 2026
+.Dt DOCGAP 1
+.Os
+.Sh NAME
+.Nm docgap
+.Nd FreeBSD Documentation Gap Detector \(em monitors commits and generates documentation patches
+.Sh SYNOPSIS
+.Nm
+.Op Fl c Ar config_file
+.Op Fl v
+.Ar command
+.Op Ar arguments
+.Pp
+.Nm
+.Cm run
+.Op Fl s Ar timestamp
+.Op Fl -dry-run
+.Pp
+.Nm
+.Cm status
+.Pp
+.Nm
+.Cm log
+.Op Fl -since Ar date
+.Op Fl -status Ar status
+.Pp
+.Nm
+.Cm init
+.Pp
+.Nm
+.Cm report
+.Op Fl -format Ar txt Ns | Ns Ar json
+.Pp
+.Nm
+.Cm config Cm show
+.Pp
+.Nm
+.Cm review Cm list
+.Pp
+.Nm
+.Cm review Cm show
+.Ar commit_hash
+.Pp
+.Nm
+.Cm review Cm approve
+.Op Ar commit_hash
+.Op Fl -all
+.Op Fl -since Ar timestamp
+.Op Fl -reviewer Ar name
+.Pp
+.Nm
+.Cm review Cm reject
+.Ar commit_hash
+.Op Fl -reason Ar text
+.Op Fl -reviewer Ar name
+.Pp
+.Nm
+.Cm reprocess
+.Op Ar commit_hash
+.Op Fl -failed
+.Op Fl -pending
+.Op Fl -stage1 Ar hash
+.Op Fl -stage2 Ar hash
+.Op Fl -since Ar timestamp
+.Op Fl -dry-run
+.Op Fl -max-retries Ar n
+.Pp
+.Nm
+.Cm heal
+.Op Fl -fix
+.Op Fl -dry-run
+.Pp
+.Nm
+.Cm validate
+.Pp
+.Nm
+.Cm reset
+.Ar commit_hash
+.Op Fl -confirm
+.Pp
+.Nm
+.Cm purge
+.Fl -before Ar timestamp
+.Op Fl -status Ar status
+.Op Fl -include-output
+.Op Fl -dry-run
+.Op Fl -confirm
+.Sh DESCRIPTION
+.Nm
+is a batch-processing pipeline that monitors FreeBSD source commits and generates
+documentation patches using local LLM inference.
+.Pp
+The tool operates in two sequential stages:
+.Bl -tag -width "Stage 2"
+.It Stage 1
+.Em Detection :
+classifies each new commit as
+.Sy needs_doc ,
+.Sy irrelevant ,
+or
+.Sy uncertain
+using a locally-running LLM model via Ollama.
+.It Stage 2
+.Em Generation :
+produces draft documentation patches in mdoc(7) or AsciiDoc format for
+commits that were classified as requiring documentation.
+.El
+.Pp
+Results are stored in a SQLite database and an output directory.
+Human reviewers then inspect the generated patches and mark commits as
+.Sy reviewed
+(approved) or
+.Sy false_positive
+(no documentation needed).
+.Sh COMMIT STATE MACHINE
+Each commit tracked by
+.Nm
+transitions through the following states:
+.Bl -tag -width "false_positive"
+.It Sy pending
+Commit has been fetched but not yet classified.
+.It Sy needs_doc
+Stage\~1 classified the commit as requiring documentation.
+.It Sy doc_generated
+Stage\~2 has produced a draft patch for the commit.
+.It Sy uncertain
+Stage\~1 could not reach a confident classification.
+.It Sy irrelevant
+Stage\~1 determined no documentation change is needed.
+.It Sy reviewed
+A reviewer approved the commit (via
+.Cm review approve ) .
+.It Sy false_positive
+A reviewer rejected the commit (via
+.Cm review reject ) .
+.It Sy submitted
+The documentation patch has been submitted upstream.
+.It Sy error
+Stage\~1 classification encountered an unrecoverable error.
+Can be retried via
+.Cm reprocess .
+.It Sy generation_error
+Stage\~2 generation failed.
+Can be retried via
+.Cm reprocess .
+.El
+.Pp
+Valid transitions:
+.Bd -literal -offset indent
+pending --> needs_doc | irrelevant | uncertain  (Stage 1)
+needs_doc --> doc_generated                     (Stage 2)
+needs_doc | doc_generated --> reviewed          (approve)
+needs_doc | doc_generated | uncertain --> false_positive  (reject)
+pending --> error                              (Stage 1 failure)
+needs_doc --> generation_error                 (Stage 2 failure)
+error | generation_error --> pending           (reset or reprocess)
+.Ed
+.Sh COMMANDS
+.Ss docgap run
+Execute the full detection and generation pipeline.
+Fetches new commits from the configured repositories, runs Stage\~1 classification
+on pending commits, and runs Stage\~2 generation on commits classified as
+.Sy needs_doc .
+.Bl -tag -width Fl
+.It Fl s Ar timestamp , Fl -since Ar timestamp
+Process only commits authored on or after the given ISO 8601 timestamp
+(e.g.,
+.Dq 2026-04-01T00:00:00Z ) .
+Useful for backfilling a specific time range.
+.It Fl -dry-run
+Run classification and generation without writing any results to the database.
+Useful for testing LLM responses or verifying pipeline behaviour.
+.El
+.Ss docgap status
+Show system status and pipeline health.
+Displays the last successful run, per-status commit counts, the output
+directory file count, and LLM connectivity.
+Requires the database to be initialized (see
+.Cm init ) .
+.Ss docgap log
+Query analyzed commits stored in the database.
+By default, shows commits with status
+.Sy pending
+or
+.Sy needs_doc .
+Output is limited to the 50 most recent matching commits.
+.Bl -tag -width Fl
+.It Fl -since Ar date
+Show only commits whose recorded date is on or after
+.Ar date
+(ISO 8601 format).
+.It Fl -status Ar status
+Filter results to commits with the given status.
+Valid values:
+.Sy pending ,
+.Sy needs_doc ,
+.Sy doc_generated ,
+.Sy irrelevant ,
+.Sy uncertain ,
+.Sy reviewed ,
+.Sy false_positive ,
+.Sy submitted .
+.El
+.Ss docgap init
+Initialize the SQLite database and required output directories under the
+configured
+.Va data_dir .
+Safe to run multiple times; existing data is not overwritten.
+Creates the following subdirectories:
+.Bl -bullet -compact
+.It
+.Pa <data_dir>/output/
+.It
+.Pa <data_dir>/repos/
+.El
+.Ss docgap report
+Generate a summary statistics report across all commit states.
+.Bl -tag -width Fl
+.It Fl -format Ar fmt
+Output format.
+.Ar fmt
+may be
+.Cm txt
+(human-readable, default) or
+.Cm json
+(machine-readable).
+.El
+.Ss docgap config show
+Display the active configuration, including all sections and their resolved
+values as loaded from the configuration file.
+Useful for confirming that overrides via
+.Fl -config
+or
+.Ev DOCGAP_CONFIG
+are being applied correctly.
+.Ss docgap review
+Manage human review of flagged commits.
+.Cm review
+is a command group with the following subcommands:
+.Bl -tag -width "approve"
+.It Cm list
+List commits that are awaiting review.
+Shows commits with status
+.Sy needs_doc
+or
+.Sy doc_generated ,
+including their LLM classification, confidence score, and category.
+Output is limited to 20 entries.
+.It Cm show Ar commit_hash
+Display full review details for the commit identified by
+.Ar commit_hash .
+Shows classification metadata, LLM reasoning, and the content of any
+generated report or patch files stored in the output directory.
+.It Cm approve Op Ar commit_hash Op Fl -all Op Fl -since Ar timestamp Op Fl -reviewer Ar name
+Mark one or more commits as approved for documentation update, transitioning
+their status from
+.Sy needs_doc
+or
+.Sy doc_generated
+to
+.Sy reviewed .
+.Pp
+When
+.Ar commit_hash
+is given, only that single commit is approved.
+With
+.Fl -all ,
+all approvable commits are approved in bulk, optionally restricted to those
+added on or after
+.Fl -since Ar timestamp .
+.Bl -tag -width Fl
+.It Ar commit_hash
+Hash of the specific commit to approve.
+.It Fl -all
+Approve all commits currently in an approvable state
+.Pq Sy needs_doc No or Sy doc_generated .
+.It Fl -since Ar timestamp
+When used with
+.Fl -all ,
+limit bulk approval to commits on or after this ISO 8601 timestamp.
+.It Fl -reviewer Ar name
+Record
+.Ar name
+as the reviewer.
+Defaults to the value of
+.Ev USER .
+.El
+.It Cm reject Ar commit_hash Op Fl -reason Ar text Op Fl -reviewer Ar name
+Mark a commit as a false positive \(em no documentation is needed.
+Transitions the commit status from
+.Sy needs_doc ,
+.Sy doc_generated ,
+or
+.Sy uncertain
+to
+.Sy false_positive .
+.Bl -tag -width Fl
+.It Ar commit_hash
+Hash of the commit to reject.
+.It Fl r Ar text , Fl -reason Ar text
+Free-text reason for the rejection, stored as reviewer feedback.
+.It Fl -reviewer Ar name
+Record
+.Ar name
+as the reviewer.
+Defaults to the value of
+.Ev USER .
+.El
+.El
+.Ss docgap reprocess
+Reprocess failed or incomplete commits through the pipeline.
+Retries commits that were interrupted or encountered errors during
+Stage\~1 detection or Stage\~2 generation.
+.Bl -tag -width Fl
+.It Ar commit_hash
+Reprocess a specific commit through both stages.
+.It Fl -failed
+Reprocess all commits with
+.Sy error
+or
+.Sy generation_error
+status.
+.It Fl -pending
+Reprocess all commits with
+.Sy needs_doc
+status that have not yet generated documentation.
+.It Fl -stage1 Ar hash
+Re-run only Stage\~1 (detection) for the specified commit.
+.It Fl -stage2 Ar hash
+Re-run only Stage\~2 (generation) for the specified commit.
+Requires the commit to have
+.Sy needs_doc
+classification.
+.It Fl -since Ar timestamp
+Reprocess all commits since the given ISO 8601 timestamp.
+.It Fl -dry-run
+Show what would be reprocessed without writing changes.
+.It Fl -max-retries Ar n
+Maximum retry count per commit before skipping (default: 3).
+Prevents infinite retry loops.
+.El
+.Ss docgap heal
+Detect and repair interrupted runs and stuck commits.
+Without
+.Fl -fix ,
+reports issues found without making changes.
+.Pp
+Checks performed:
+.Bl -bullet -compact
+.It
+Stale runs (status
+.Sy running
+for more than 24 hours)
+.It
+Incomplete Stage\~2 (commits with
+.Sy needs_doc
+but no output files)
+.It
+Retryable errors (commits with
+.Sy error
+or
+.Sy generation_error
+below the retry limit)
+.El
+.Bl -tag -width Fl
+.It Fl -fix
+Automatically repair detected issues: mark stale runs as failed and
+reprocess stuck commits.
+.It Fl -dry-run
+Show what
+.Fl -fix
+would do without writing changes.
+.El
+.Ss docgap validate
+Check system integrity.
+Verifies configuration, database connectivity, repository state,
+LLM server health, and data directory permissions.
+.Pp
+Exit codes:
+.Bl -tag -width "2" -compact
+.It 0
+All checks passed.
+.It 1
+One or more warnings (non-critical).
+.It 2
+One or more errors (critical).
+.El
+.Ss docgap reset
+Reset a commit to
+.Sy pending
+status for full reprocessing.
+Clears the commit's classification, confidence, category, and reasoning,
+increments the retry counter, and removes any output directory.
+.Bl -tag -width Fl
+.It Ar commit_hash
+Hash of the commit to reset.
+.It Fl -confirm
+Skip the interactive confirmation prompt.
+.El
+.Ss docgap purge
+Clean old data from the database and optionally remove output directories.
+.Bl -tag -width Fl
+.It Fl -before Ar timestamp
+.Pq required
+Purge commits older than this ISO 8601 timestamp.
+.It Fl -status Ar status
+Restrict purge to commits with this status.
+May be repeated for multiple statuses.
+Default: only terminal statuses
+.Pq Sy irrelevant , false_positive , reviewed , submitted .
+.It Fl -include-output
+Also delete output directories for purged commits.
+.It Fl -dry-run
+Show what would be purged without making changes.
+.It Fl -confirm
+Skip the interactive confirmation prompt.
+.El
+.Sh OPTIONS
+.Ss Global Options
+The following options apply to all commands and must be given before the
+command name.
+.Bl -tag -width Fl
+.It Fl c Ar file , Fl -config Ar file
+Path to the YAML configuration file.
+Overrides the
+.Ev DOCGAP_CONFIG
+environment variable.
+Default:
+.Pa config/config.yaml .
+On a production FreeBSD installation the default is typically
+.Pa /usr/local/etc/docgap/config.yaml .
+.It Fl v , Fl -verbose
+Enable verbose (DEBUG-level) log output.
+Without this flag, only INFO-level and above messages are printed.
+.It Fl -version
+Print the
+.Nm
+version string and exit.
+.El
+.Sh CONFIGURATION
+.Nm
+reads its configuration from a YAML file.
+The file path is resolved in the following order:
+.Bl -enum -compact
+.It
+The
+.Fl -config
+command-line option.
+.It
+The
+.Ev DOCGAP_CONFIG
+environment variable.
+.It
+The compiled-in default path.
+.El
+.Pp
+Run
+.Nm Cm config Cm show
+to print all resolved configuration values.
+.Pp
+The configuration file is organized into sections:
+.Bl -tag -width "repositories"
+.It Sy general
+.Bl -tag -width "log_level" -compact
+.It Va data_dir
+Root directory for the database, output files, and cloned repositories.
+.It Va log_level
+Logging verbosity (e.g.,
+.Dq INFO ,
+.Dq DEBUG ) .
+.El
+.It Sy repositories
+.Bl -tag -width "freebsd_src.remote" -compact
+.It Va freebsd_src.path
+Local path for the FreeBSD
+.Pa src
+repository checkout.
+.It Va freebsd_src.remote
+Upstream URL used to fetch new commits.
+.It Va freebsd_doc.path
+Local path for the FreeBSD
+.Pa doc
+repository checkout.
+.It Va freebsd_doc.remote
+Upstream URL for the documentation repository.
+.El
+.It Sy llm
+.Bl -tag -width "timeout" -compact
+.It Va base_url
+HTTP base URL for the Ollama API (e.g.,
+.Dq http://localhost:11434 ) .
+.It Va model
+Ollama model name to use for inference.
+.It Va timeout
+Request timeout in seconds.
+.El
+.It Sy detection
+.Bl -tag -width "confidence_threshold_reject" -compact
+.It Va confidence_threshold_accept
+Minimum confidence score (0\(en1) to classify a commit as
+.Sy needs_doc .
+.It Va confidence_threshold_reject
+Maximum confidence score to classify a commit as
+.Sy irrelevant .
+Commits between the two thresholds are marked
+.Sy uncertain .
+.El
+.It Sy generation
+.Bl -tag -width "validate_asciidoc" -compact
+.It Va validate_mdoc
+If
+.Dq true ,
+validate generated mdoc(7) patches with
+.Xr mandoc 1 .
+.It Va validate_asciidoc
+If
+.Dq true ,
+validate generated AsciiDoc patches.
+.El
+.It Sy notification
+.Bl -tag -width "committer_notify" -compact
+.It Va doceng_recipients
+List of email addresses that receive documentation-gap digests.
+.It Va committer_notify
+If
+.Dq true ,
+also notify the original commit author.
+.It Va from_address
+Envelope sender address for outgoing notifications.
+.El
+.It Sy debug
+.Bl -tag -width "include_config_snapshot" -compact
+.It Va llm_logging
+If
+.Dq true ,
+save all LLM prompts and responses to disk under
+.Pa <data_dir>/debug/<commit-hash>/ .
+Useful for cross-model performance evaluation.
+Default:
+.Dq false .
+.It Va log_dir
+Directory for debug log output.
+Defaults to
+.Pa <data_dir>/debug .
+.It Va max_debug_entries
+Maximum number of debug directories to retain before rotating oldest.
+Default: 500.
+.It Va include_config_snapshot
+If
+.Dq true ,
+include detection and generation settings in
+.Pa metadata.json .
+Default:
+.Dq true .
+.El
+.El
+.Sh PROMPT TEMPLATES
+.Nm
+uses LLM prompt templates for both Stage\~1 classification and Stage\~2
+generation.
+Templates are loaded using a three-level fallback chain:
+.Bl -enum
+.It
+.Pa /usr/local/etc/docgap/prompts/ Ns Ar name Ns Pa .txt
+\(em system override (highest priority).
+.It
+.Pa prompts/ Ns Ar name Ns Pa .txt
+relative to the installation directory \(em project-level override.
+.It
+Hardcoded default embedded in the Python source \(em always available.
+.El
+.Pp
+The
+.Pa /usr/local/etc/docgap/prompts/
+directory is created empty during installation.
+This is by design: the built-in defaults work without any template files.
+To customize a prompt, create a file with the appropriate name:
+.Bl -tag -width "generation-asciidoc.txt"
+.It Pa detection.txt
+Stage\~1 classification prompt.
+.It Pa generation-mdoc.txt
+Stage\~2 prompt for mdoc(7) manpage generation.
+.It Pa generation-asciidoc.txt
+Stage\~2 prompt for AsciiDoc handbook/article generation.
+.El
+.Pp
+System-level files in
+.Pa /usr/local/etc/docgap/prompts/
+take precedence over project-level files and built-in defaults.
+.Sh ENVIRONMENT
+.Bl -tag -width "DOCGAP_CONFIG"
+.It Ev DOCGAP_CONFIG
+Path to the YAML configuration file.
+Overridden by the
+.Fl -config
+option.
+.It Ev USER
+Login name of the current user.
+Used as the default
+.Fl -reviewer
+name when approving or rejecting commits.
+.El
+.Sh FILES
+.Ss Data Files
+.Bl -tag -width "/var/db/docgap/output/<hash>/handbook.patch"
+.It Pa <data_dir>/docgap.sqlite
+SQLite database storing commit records, pipeline run history, and
+notification state.
+.It Pa <data_dir>/output/
+Root directory for all generated artifacts.
+.It Pa <data_dir>/output/ Ns Ar hash Ns Pa /report.txt
+Human-readable analysis report for a specific commit.
+.It Pa <data_dir>/output/ Ns Ar hash Ns Pa /manpage.patch
+Generated mdoc(7) patch for commits targeting manual pages.
+.It Pa <data_dir>/output/ Ns Ar hash Ns Pa /handbook.patch
+Generated AsciiDoc patch for commits targeting the FreeBSD Handbook or other book/article content.
+.It Pa <data_dir>/repos/
+Directory where repository checkouts are managed.
+.It Pa <data_dir>/debug/
+Root directory for LLM debug logs (when
+.Va debug.llm_logging
+is enabled).
+.It Pa <data_dir>/debug/ Ns Ar hash Ns Pa /metadata.json
+Model information, timestamps, and configuration snapshot for a commit.
+.El
+.Ss Configuration Files
+.Bl -tag -width "/usr/local/etc/docgap/config.yaml"
+.It Pa /usr/local/etc/docgap/config.yaml
+Primary configuration file for production FreeBSD installations.
+.It Pa config/config.yaml.sample
+Annotated sample configuration file distributed with the source.
+.El
+.Ss Service Files
+.Bl -tag -width "/usr/local/etc/rc.d/docgap"
+.It Pa /usr/local/etc/rc.d/docgap
+FreeBSD rc.d service script for daemon-mode operation.
+.It Pa /usr/local/etc/cron.d/docgap
+Sample cron entry for automated periodic runs.
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Bl -tag -width "2"
+.It 0
+Success \(em the command completed without errors.
+.It 1
+Partial success or a non-fatal error
+(e.g., a single commit could not be processed, or a requested
+commit hash was not found).
+.It 2
+Fatal error \(em the pipeline failed to run (e.g., database missing,
+configuration invalid).
+.El
+.Sh EXAMPLES
+.Ss Initialize the system
+Run once after installation before any other command:
+.Bd -literal -offset indent
+docgap init
+.Ed
+.Ss Run the full pipeline
+Fetch new commits and process them through both stages:
+.Bd -literal -offset indent
+docgap run
+.Ed
+.Ss Backfill from a specific date
+Process all commits since a given timestamp:
+.Bd -literal -offset indent
+docgap run --since 2026-04-01T00:00:00Z
+.Ed
+.Ss Dry-run to preview LLM output without writing to the database
+.Bd -literal -offset indent
+docgap run --dry-run
+.Ed
+.Ss Check system health and LLM connectivity
+.Bd -literal -offset indent
+docgap status
+.Ed
+.Ss List commits awaiting review
+.Bd -literal -offset indent
+docgap review list
+.Ed
+.Ss Inspect a specific commit and its generated patch
+.Bd -literal -offset indent
+docgap review show abc123def456
+.Ed
+.Ss Approve a single commit for documentation
+.Bd -literal -offset indent
+docgap review approve abc123def456 --reviewer jdoe
+.Ed
+.Ss Bulk-approve all commits generated since a date
+.Bd -literal -offset indent
+docgap review approve --all --since 2026-03-01T00:00:00Z --reviewer jdoe
+.Ed
+.Ss Reject a commit as a false positive with a reason
+.Bd -literal -offset indent
+docgap review reject abc123def456 --reason "Only changes test harness, no public API impact"
+.Ed
+.Ss Filter the log to commits needing documentation
+.Bd -literal -offset indent
+docgap log --status needs_doc
+.Ed
+.Ss Show commits since a specific date
+.Bd -literal -offset indent
+docgap log --since 2026-03-15T00:00:00Z
+.Ed
+.Ss Print the active configuration
+.Bd -literal -offset indent
+docgap config show
+.Ed
+.Ss Use a custom configuration file
+.Bd -literal -offset indent
+docgap --config /etc/myconfig.yaml status
+.Ed
+.Ss Generate a summary report
+.Bd -literal -offset indent
+docgap report
+docgap report --format json
+.Ed
+.Ss Cron setup for automated runs
+Add to
+.Pa /etc/crontab
+to run the pipeline every six hours:
+.Bd -literal -offset indent
+0 */6 * * *  root  /usr/local/bin/docgap run >> /var/db/docgap/logs/cron.log 2>&1
+.Ed
+.Ss Reprocess all failed commits
+.Bd -literal -offset indent
+docgap reprocess --failed
+.Ed
+.Ss Reprocess only Stage 2 for a specific commit
+.Bd -literal -offset indent
+docgap reprocess --stage2 abc123def456
+.Ed
+.Ss Detect and auto-fix pipeline issues
+.Bd -literal -offset indent
+docgap heal --fix
+.Ed
+.Ss Check system integrity
+.Bd -literal -offset indent
+docgap validate
+.Ed
+.Ss Reset a commit for full reprocessing
+.Bd -literal -offset indent
+docgap reset abc123def456 --confirm
+.Ed
+.Ss Purge old data
+.Bd -literal -offset indent
+docgap purge --before 2026-01-01T00:00:00Z --include-output --confirm
+.Ed
+.Sh DIAGNOSTICS
+.Bl -tag -width "LLM connection failed"
+.It Database not initialized
+The SQLite database does not exist at the configured path.
+Run
+.Nm Cm init
+to create it.
+.It LLM connection failed
+.Nm
+could not reach the Ollama API.
+Verify that Ollama is running and the required model is loaded:
+.Bd -literal -offset indent
+ollama ps
+ollama pull <model>
+.Ed
+.It Permission denied
+The process lacks write access to
+.Va data_dir
+or its subdirectories.
+Check ownership and permissions.
+.It Cannot approve/reject: status is '...'
+The commit is in a state that does not permit the requested action.
+Consult the state machine in
+.Sx COMMIT STATE MACHINE
+for valid transitions.
+.El
+.Sh IMPLICIT BEHAVIORS
+The following behaviors occur automatically and may affect operation:
+.Ss Pipeline Resume
+On its first run with no prior history,
+.Nm
+processes commits from the last 7 days.
+On subsequent runs, it resumes from the
+.Va finished_at
+timestamp of the last successful run.
+Commits already recorded in the database are skipped silently.
+.Ss Error Recovery
+If the LLM call fails during Stage\~1 classification, the commit is
+marked as
+.Sy UNCERTAIN
+with confidence 0.0 rather than failing the pipeline.
+This keeps batch processing running but may mask connectivity issues.
+.Ss Input Truncation
+Large inputs are truncated automatically to prevent resource exhaustion:
+.Bl -tag -width "Commit diff" -compact
+.It Commit diff
+100,000 characters
+.It Commit subject
+1,000 characters
+.It File list
+500 files
+.It Doc content
+50,000 characters
+.It LLM response
+200,000 characters
+.El
+.Pp
+Classification and generation are performed on the truncated input.
+For very large commits, this may reduce accuracy.
+.Ss Placeholder Patches
+If Stage\~2 generation produces no valid unified diff, a placeholder
+comment with
+.Dq TODO: Add documentation here
+is saved and the commit is marked
+.Sy doc_generated .
+Review these outputs carefully.
+.Ss Database Initialization
+.Cm init
+deletes and recreates the database if one already exists.
+Back up the database before running
+.Cm init
+on a system with existing data.
+.Ss Configuration File Search
+When no
+.Fl -config
+option is given, the configuration file is searched in order:
+.Pa /usr/local/etc/docgap/config.yaml ,
+.Pa /etc/docgap/config.yaml ,
+then
+.Pa config/config.yaml
+relative to the installation.
+The first file found is used.
+.Sh SEE ALSO
+.Xr mandoc 1 ,
+.Xr ollama 1 ,
+.Xr sqlite3 1 ,
+.Xr crontab 5 ,
+.Xr mdoc 7 ,
+.Xr sendmail 8
+.Pp
+Project home page and documentation:
+.Lk https://github.com/ebrandi/docgap
+.Sh STANDARDS
+Generated documentation patches follow FreeBSD
+.Xr mdoc 7
+format conventions.
+The configuration file uses YAML 1.2 syntax.
+.Sh HISTORY
+.Nm
+was created to address the documentation gap in FreeBSD development by
+automatically identifying source code changes that require corresponding
+documentation updates.
+.Sh AUTHORS
+.An Edson Brandi Aq Mt ebrandi@FreeBSD.org
+.Sh BUGS
+Known limitations:
+.Bl -bullet
+.It
+Stage\~2 generation produces draft patches that require human review before
+being applied or submitted upstream.
+.It
+LLM classification accuracy depends on the quality and size of the locally
+available model.
+.It
+Only the FreeBSD
+.Pa src
+repository is directly supported as a commit source.
+.El
+.Pp
+Report bugs at:
+.Lk https://github.com/ebrandi/docgap/issues

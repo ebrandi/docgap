@@ -1,0 +1,49 @@
+FreeBSD Documentation Project (FDP) Conventions
+===============================================
+
+General Style Guidelines
+------------------------
+
+1. Be concise and to the point
+2. Use active voice when possible
+3. Include examples where helpful
+4. Link to related documentation
+5. Keep up to date with FreeBSD releases
+
+Manpage (mdoc) Format
+---------------------
+
+Structure (in order):
+- .Dd - Document date
+- .Dt - Document title and section
+- .Os - Operating system
+- .Sh NAME - Command name and brief description
+- .Sh SYNOPSIS - Syntax
+- .Sh DESCRIPTION - Detailed explanation
+- .Sh OPTIONS - Command line options
+- .Sh ENVIRONMENT - Environment variables
+- .Sh FILES - Files used
+- .Sh EXIT STATUS - Exit codes
+- .Sh EXAMPLES - Usage examples
+- .Sh DIAGNOSTICS - Error messages
+- .Sh SECURITY - Security considerations
+- .Sh HISTORY - History
+- .Sh AUTHORS - Authors
+- .Sh BUGS - Known bugs
+
+AsciiDoc Format
+---------------
+
+Document structure:
+= Title
+== Level 2 Section
+=== Level 3 Section
+==== Level 4 Section
+
+Code blocks:
+[source,c]
+----
+code here
+----
+
+Links: xref:path/to/section.adoc[link text]

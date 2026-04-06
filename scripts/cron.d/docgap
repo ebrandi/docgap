@@ -1,0 +1,11 @@
+#!/bin/sh
+# Cron entry for docgap - FreeBSD Documentation Gap Detector
+# Run every 6 hours, logging output
+#
+# Install via scripts/install.sh or copy manually to the appropriate cron.d
+# directory: /usr/local/etc/cron.d/ (FreeBSD) or /etc/cron.d/ (Linux)
+
+# System-wide crontab format (for /etc/crontab or /usr/local/etc/cron.d/):
+SHELL=/bin/sh
+PATH=/usr/local/bin:/usr/bin:/bin
+0 */6 * * * root /usr/local/bin/docgap run >> /var/db/docgap/logs/cron.log 2>&1

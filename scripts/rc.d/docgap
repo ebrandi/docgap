@@ -1,0 +1,51 @@
+#!/bin/sh
+
+# PROVIDE: docgap
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="docgap"
+rcvar="docgap_enable"
+desc="FreeBSD Documentation Gap Detector"
+
+: ${docgap_enable:="NO"}
+: ${docgap_config:="/usr/local/etc/docgap/config.yaml"}
+: ${docgap_user:="root"}
+
+: ${docgap_data_dir:="/var/db/docgap"}
+
+pidfile="/var/run/${name}.pid"
+docgap_command="/usr/local/bin/docgap"
+
+start_cmd="docgap_start"
+stop_cmd="docgap_stop"
+status_cmd="docgap_status"
+
+docgap_start()
+{
+    echo "Running docgap pipeline..."
+    /usr/sbin/daemon -p "${pidfile}" -u "${docgap_user}" \
+        "${docgap_command}" --config "${docgap_config}" run \
+        >> "${docgap_data_dir}/logs/cron.log" 2>&1
+}
+
+docgap_stop()
+{
+    if [ -f "${pidfile}" ]; then
+        kill "$(cat "${pidfile}")" 2>/dev/null
+        rm -f "${pidfile}"
+        echo "docgap stopped."
+    else
+        echo "docgap is not running."
+    fi
+}
+
+docgap_status()
+{
+    "${docgap_command}" --config "${docgap_config}" status
+}
+
+load_rc_config $name
+run_rc_command "$1"

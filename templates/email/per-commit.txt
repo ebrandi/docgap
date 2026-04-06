@@ -1,0 +1,28 @@
+Hi,
+
+Your recent commit to the FreeBSD source tree appears to require a
+documentation update. The Documentation Gap Detector has generated a
+draft report for your review.
+
+Commit Details:
+---------------
+Hash: {{ commit_hash_short }}
+Subject: {{ subject }}
+Author: {{ author }}
+
+Classification: {{ category }}
+{{ reasoning_line }}
+
+To review the proposed documentation:
+  docgap review show {{ commit_hash_short }}
+
+If the draft looks good, you can approve it:
+  docgap review approve {{ commit_hash_short }}
+
+If it's inaccurate or unnecessary:
+  docgap review reject {{ commit_hash_short }}
+
+Your feedback helps improve the system's accuracy.
+
+ FreeBSD Documentation Gap Detector
+    (maintained by Doceng)

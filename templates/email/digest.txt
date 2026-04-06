@@ -1,0 +1,19 @@
+FreeBSD Documentation Gap Detector
+==================================================
+
+Run ID: {{ run_id }}
+Started: {{ started_at }}
+Finished: {{ finished_at }}
+
+Summary:
+  Commits analyzed: {{ total_commits }}
+  Flagged for docs: {{ flagged_count }}
+  Uncertain: {{ uncertain_count }}
+
+{{ flagged_list }}
+
+To review a specific commit:
+  docgap review show <commit-hash>
+
+For more information:
+  docgap --help

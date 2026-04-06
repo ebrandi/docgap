@@ -1,0 +1,326 @@
+# =============================================================================
+# docgap Configuration File
+# =============================================================================
+#
+# FreeBSD Documentation Gap Detector
+#
+# Copy this file to /usr/local/etc/docgap/config.yaml and customize for your
+# environment. All settings can also be overridden with environment variables
+# using the pattern: DOCGAP_<SECTION>_<KEY> (e.g., DOCGAP_LLM_BASE_URL).
+#
+# See: man docgap(1) for full documentation
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# General Settings
+# -----------------------------------------------------------------------------
+general:
+  # Directory where docgap stores all runtime data: database, repos, output,
+  # and logs. The directory is created automatically on first run.
+  # Type: string (absolute path)
+  # Default: /var/db/docgap
+  data_dir: /var/db/docgap
+
+  # Logging verbosity level. Controls how much detail appears in log output.
+  # Values: debug | info | warning | error
+  #   debug   - Verbose output including LLM prompts and responses
+  #   info    - Normal operational messages (recommended for production)
+  #   warning - Only warnings and errors
+  #   error   - Only errors
+  # Default: info
+  log_level: info
+
+# -----------------------------------------------------------------------------
+# Git Repositories
+# -----------------------------------------------------------------------------
+# docgap monitors FreeBSD source commits and cross-references them against
+# the documentation repository. Both repositories are cloned locally.
+repositories:
+  freebsd_src:
+    # Local path where the freebsd-src repository will be cloned/fetched.
+    # The repository is fetched as bare (no working tree) to save disk space.
+    # Type: string (absolute path)
+    path: /var/db/docgap/repos/freebsd-src
+
+    # Git remote URL for the FreeBSD source repository.
+    # Type: string (git URL)
+    remote: https://github.com/freebsd/freebsd-src.git
+
+    # Branches to monitor for new commits. The pipeline processes commits
+    # from each listed branch on every run.
+    # Type: list of strings
+    # Default: [main]
+    branches:
+      - main
+      # - stable/14    # Uncomment to also monitor the stable/14 branch
+      # - stable/15    # Uncomment to also monitor the stable/15 branch
+
+  freebsd_doc:
+    # Local path where the freebsd-doc repository will be cloned.
+    # This is a full working tree clone (not bare) because docgap reads
+    # documentation files directly for cross-referencing.
+    # Type: string (absolute path)
+    path: /var/db/docgap/repos/freebsd-doc
+
+    # Git remote URL for the FreeBSD documentation repository.
+    # Type: string (git URL)
+    remote: https://github.com/freebsd/freebsd-doc.git
+
+# -----------------------------------------------------------------------------
+# LLM Configuration (Ollama)
+# -----------------------------------------------------------------------------
+# docgap uses a local LLM via Ollama for both Stage 1 (detection/classification)
+# and Stage 2 (documentation generation). The LLM must be running and accessible
+# before starting the pipeline.
+llm:
+  # LLM provider. Currently only "ollama" is supported.
+  # Values: ollama
+  # Default: ollama
+  provider: ollama
+
+  # Base URL of the Ollama HTTP API. If running Ollama on the same machine,
+  # use http://localhost:11434. For a remote Ollama server, use its address.
+  # Type: string (URL)
+  # Default: http://localhost:11434
+  base_url: http://localhost:11434
+
+  # Model name to use for inference. Must be pulled in Ollama first
+  # (e.g., `ollama pull qwen3-coder-next-512k`). Choose a model that fits
+  # your available VRAM and supports the context window you need.
+  # Type: string
+  # Default: qwen3-coder-next-512k
+  # Examples: qwen3-coder-next-512k, qwen3.5:122b-96g-128k, llama3:70b
+  model: qwen3-coder-next-512k:latest
+
+  # Sampling temperature for LLM responses. Lower values produce more
+  # deterministic, focused output. Higher values increase creativity but
+  # may reduce classification accuracy.
+  # Type: float (0.0 to 2.0)
+  # Default: 0.1
+  # Recommended: 0.1 for classification, up to 0.3 for generation
+  temperature: 0.1
+
+  # Maximum context window size in tokens. Must not exceed the model's
+  # supported context length. Larger values allow processing bigger diffs
+  # and more documentation context simultaneously.
+  # Type: integer (tokens)
+  # Default: 524288 (512k)
+  max_context: 131072
+
+  # HTTP request timeout in seconds for LLM API calls. Increase this if
+  # you experience timeouts with large diffs or slow hardware.
+  # Type: integer (seconds)
+  # Default: 120
+  # Range: 30-600 (higher for complex commits or slower hardware)
+  timeout: 600
+
+# -----------------------------------------------------------------------------
+# Detection Settings (Stage 1)
+# -----------------------------------------------------------------------------
+# Stage 1 classifies each commit as NEEDS_DOC, IRRELEVANT, or UNCERTAIN.
+# These settings control confidence thresholds and pre-filter rules that
+# skip obviously irrelevant commits before they reach the LLM.
+detection:
+  # Minimum confidence score to accept the LLM's classification as-is.
+  # If the LLM returns confidence >= this value, the classification is trusted.
+  # If confidence is between reject and accept thresholds, the commit is
+  # overridden to UNCERTAIN for human triage.
+  # Type: float (0.0 to 1.0)
+  # Default: 0.80
+  confidence_threshold_accept: 0.80
+
+  # Confidence score below which a commit is overridden to IRRELEVANT,
+  # regardless of the LLM's classification (the model is guessing).
+  # Commits between reject and accept thresholds become UNCERTAIN.
+  # Type: float (0.0 to 1.0)
+  # Default: 0.50
+  confidence_threshold_reject: 0.50
+
+  # Regular expression patterns matched against commit subjects. If a commit
+  # subject matches any pattern, it is skipped entirely (no LLM call).
+  # These pre-filters reduce LLM usage by 40-60% for typical FreeBSD commits.
+  # Type: list of strings (Python regex syntax)
+  # Default: ["^Merge ", "^MFC ", "^MFS ", "^Revert "]
+  skip_patterns:
+    - "^Merge "     # Merge commits (never need documentation)
+    - "^MFC "       # Merge From Current to stable branches
+    - "^MFS "       # Merge From Stable
+    - "^Revert "    # Revert commits
+
+  # File path prefixes to skip. If ALL files in a commit match one of these
+  # prefixes, the commit is skipped (no LLM call). Useful for excluding
+  # vendor imports and third-party code.
+  # Type: list of strings (path prefixes, case-sensitive)
+  # Default: [contrib/, sys/contrib/, .github/]
+  skip_paths:
+    - contrib/          # Third-party contributed code
+    - sys/contrib/      # Kernel third-party code
+    - .github/          # GitHub CI configuration
+
+  # Specific filenames to skip. If a commit ONLY touches files with these
+  # exact names, it is skipped. Useful for build system and metadata files.
+  # Type: list of strings (exact filenames, case-sensitive)
+  # Default: [Makefile, .gitignore, UPDATING, ObsoleteFiles.inc]
+  skip_files:
+    - Makefile
+    - .gitignore
+    - UPDATING
+    - ObsoleteFiles.inc
+
+# -----------------------------------------------------------------------------
+# Generation Settings (Stage 2)
+# -----------------------------------------------------------------------------
+# Stage 2 generates draft documentation patches for commits classified as
+# NEEDS_DOC. It produces unified diff patches in mdoc(7) or AsciiDoc format.
+generation:
+  # Enable or disable Stage 2 generation. When disabled, docgap only
+  # classifies commits (Stage 1) without generating documentation.
+  # Set to false if you only want detection reports.
+  # Type: boolean (true | false)
+  # Default: true
+  enabled: true
+
+  # Validate generated mdoc(7) content using mandoc(1) -Tlint.
+  # Requires mandoc to be installed on the system.
+  # If validation fails, the output is saved with a validation_failed flag.
+  # Type: boolean (true | false)
+  # Default: true
+  validate_mdoc: true
+
+  # Validate generated AsciiDoc content using asciidoctor --safe.
+  # Requires asciidoctor to be installed on the system.
+  # Type: boolean (true | false)
+  # Default: true
+  validate_asciidoc: true
+
+  # Maximum number of retries if generation or validation fails.
+  # Each retry makes a new LLM call, which may produce different output.
+  # Type: integer (0-5)
+  # Default: 1
+  max_retries: 3
+
+# -----------------------------------------------------------------------------
+# Human Review Settings
+# -----------------------------------------------------------------------------
+# All generated documentation requires human approval before submission.
+# The auto_submit feature is designed for future use when the system has
+# proven reliable. It is disabled by default in v1.
+review:
+  auto_submit:
+    # Enable automatic submission of approved patches after the hold period.
+    # WARNING: Keep this disabled until the system has proven reliable.
+    # Type: boolean (true | false)
+    # Default: false
+    enabled: false
+
+    # Hours to wait after approval before auto-submitting. Only applies
+    # when auto_submit.enabled is true. Gives reviewers time to reconsider.
+    # Type: integer (hours)
+    # Default: 72 (3 days)
+    hold_period_hours: 72
+
+    # Per-category auto-submit flags. Even when auto_submit is enabled,
+    # individual categories can be excluded. Each category corresponds to
+    # a classification type from Stage 1.
+    # Type: boolean per category (true | false)
+    # Default: all false
+    categories:
+      new_flag: false           # New command-line flags/options
+      new_command: false        # New userland commands or daemons
+      changed_default: false    # Changes to default behavior
+      new_syscall: false        # New system calls
+      new_sysctl: false         # New sysctl knobs
+      changed_output: false     # Changes to command output format
+      new_ioctl: false          # New ioctl interfaces
+      api_change: false         # Modified library APIs
+
+# -----------------------------------------------------------------------------
+# Debug Settings
+# -----------------------------------------------------------------------------
+# Optional debug features for development, testing, and LLM performance
+# evaluation. When LLM logging is enabled, all prompts sent to the LLM and
+# responses received are saved to disk for later analysis.
+debug:
+  # Enable saving LLM prompts and responses to disk.
+  # Files are saved under {data_dir}/debug/{commit_hash}/ with numbered
+  # filenames that follow the pipeline execution order.
+  # Type: boolean (true | false)
+  # Default: false
+  llm_logging: false
+
+  # Directory where debug logs are stored. Defaults to {data_dir}/debug
+  # if left empty. Each commit gets its own subdirectory named by hash.
+  # Type: string (absolute path, or empty for default)
+  # Default: "" (uses {data_dir}/debug)
+  # log_dir: /var/db/docgap/debug
+
+  # Maximum number of debug entries (commit directories) to keep.
+  # When exceeded, the oldest entries are automatically rotated out.
+  # Type: integer
+  # Default: 500
+  max_debug_entries: 500
+
+  # Include a snapshot of detection/generation config in metadata.json.
+  # Useful for comparing LLM performance across different configurations.
+  # Type: boolean (true | false)
+  # Default: true
+  include_config_snapshot: true
+
+# -----------------------------------------------------------------------------
+# Notification Settings
+# -----------------------------------------------------------------------------
+# docgap can send email notifications when the pipeline finds commits
+# needing documentation. Notifications use sendmail(8) on the local system.
+# Ensure sendmail is configured and working before enabling notifications.
+# Test with: echo "test" | sendmail -v your-email@example.com
+notification:
+  # Enable or disable all email notifications.
+  # Type: boolean (true | false)
+  # Default: false
+  enabled: false
+
+  # List of email addresses that will receive a digest notification after
+  # each pipeline run. The digest summarizes all findings from the run.
+  #
+  # This uses YAML list syntax: each email address goes on its own line,
+  # indented under `doceng_recipients:`, and prefixed with "- " (dash + space).
+  #
+  # Example with one recipient:
+  #   doceng_recipients:
+  #     - doceng@FreeBSD.org
+  #
+  # Example with multiple recipients:
+  #   doceng_recipients:
+  #     - doceng@FreeBSD.org
+  #     - your-name@FreeBSD.org
+  #     - team-alias@example.com
+  #
+  # Example with no recipients (notifications disabled for digest):
+  #   doceng_recipients: []
+  #
+  # Type: list of email addresses
+  # Default: [] (empty list)
+  doceng_recipients: []
+
+  # Send per-commit notification emails to the original commit author.
+  # The author's email is taken from the git commit metadata.
+  # Type: boolean (true | false)
+  # Default: false
+  committer_notify: false
+
+  # Only send digest emails when the pipeline has findings (NEEDS_DOC or
+  # UNCERTAIN commits). When true, runs with zero findings produce no email.
+  # Type: boolean (true | false)
+  # Default: true
+  digest_only_if_findings: true
+
+  # Sender address for notification emails (the "From:" header).
+  # Type: string (email address)
+  # Default: docgap@FreeBSD.org
+  from_address: docgap@FreeBSD.org
+
+  # SMTP host for sending emails. Use "localhost" when sendmail(8) is
+  # configured on the same machine.
+  # Type: string (hostname or IP)
+  # Default: localhost
+  smtp_host: localhost
