@@ -396,6 +396,30 @@ def init_command(cli_obj) -> int:
         return 1
 
 
+def _format_commit_detail(commit: Dict[str, Any], output_dir: Path) -> Dict[str, Any]:
+    """Build a detail dict for a commit, including output file info."""
+    detail: Dict[str, Any] = {
+        "hash": commit.get("hash", ""),
+        "subject": commit.get("subject", ""),
+        "author": commit.get("author", ""),
+        "date": commit.get("date", ""),
+        "classification": commit.get("classification", ""),
+        "confidence": commit.get("confidence"),
+        "category": commit.get("category"),
+        "doc_target": commit.get("doc_target"),
+        "reasoning": commit.get("reasoning"),
+        "status": commit.get("status", ""),
+    }
+    # Check for output files
+    commit_output = output_dir / commit.get("hash", "")
+    if commit_output.is_dir():
+        detail["output_files"] = [f.name for f in sorted(commit_output.iterdir()) if f.is_file()]
+        report_file = commit_output / "report.txt"
+        if report_file.exists():
+            detail["report_preview"] = report_file.read_text()[:500]
+    return detail
+
+
 def report_command(cli_obj, output_format: str = "txt", output_file: Optional[str] = None, save: bool = False) -> int:
     """Generate documentation reports."""
     try:
@@ -407,11 +431,12 @@ def report_command(cli_obj, output_format: str = "txt", output_file: Optional[st
             return 1
 
         db = Database(str(db_path))
+        output_dir = Path(config.general.data_dir) / "output"
 
         # Statistics
         total = 0
         status_counts = {}
-        for status in ["pending", "needs_doc", "doc_generated", "irrelevant", "uncertain", "reviewed", "false_positive", "submitted"]:
+        for status in ["pending", "needs_doc", "doc_generated", "irrelevant", "uncertain", "reviewed", "false_positive", "submitted", "error", "generation_error"]:
             count = len(db.get_commits_by_status(status))
             status_counts[status] = count
             total += count
@@ -420,10 +445,16 @@ def report_command(cli_obj, output_format: str = "txt", output_file: Optional[st
         last_run = db.get_last_successful_run()
         timestamp = datetime.now(timezone.utc).isoformat()
 
+        # Gather detailed commit lists
+        needs_doc = db.get_commits_by_status("needs_doc")
+        doc_generated = db.get_commits_by_status("doc_generated")
+        uncertain = db.get_commits_by_status("uncertain")
+        errors = db.get_commits_by_statuses(["error", "generation_error"])
+
         if output_format == "json":
-            report_data = {
+            report_data: Dict[str, Any] = {
                 "generated_at": timestamp,
-                "status_counts": status_counts,
+                "status_counts": {k: v for k, v in status_counts.items() if v > 0},
                 "total": total,
                 "last_run": {
                     "started_at": last_run.get("started_at") if last_run else None,
@@ -432,26 +463,115 @@ def report_command(cli_obj, output_format: str = "txt", output_file: Optional[st
                     "commits_processed": last_run.get("commits_processed", 0) if last_run else 0,
                     "commits_flagged": last_run.get("commits_flagged", 0) if last_run else 0,
                 },
+                "needs_doc": [_format_commit_detail(c, output_dir) for c in needs_doc],
+                "doc_generated": [_format_commit_detail(c, output_dir) for c in doc_generated],
+                "uncertain": [_format_commit_detail(c, output_dir) for c in uncertain],
+                "errors": [_format_commit_detail(c, output_dir) for c in errors],
             }
-            content = json.dumps(report_data, indent=2)
+            content = json.dumps(report_data, indent=2, default=str)
         else:
-            lines = []
-            lines.append("=== docgap Report ===")
+            lines: List[str] = []
+            lines.append("=" * 72)
+            lines.append("docgap Report")
             lines.append(f"Generated: {timestamp}")
+            lines.append("=" * 72)
             lines.append("")
+
+            # Last run info
             if last_run:
-                lines.append(f"Last run: {last_run.get('started_at', 'N/A')} ({last_run.get('status', 'N/A')})")
-                lines.append(f"  Processed: {last_run.get('commits_processed', 0)}, Flagged: {last_run.get('commits_flagged', 0)}")
+                lines.append(f"Last successful run: {last_run.get('started_at', 'N/A')}")
+                lines.append(f"  Status: {last_run.get('status', 'N/A')}")
+                lines.append(f"  Commits processed: {last_run.get('commits_processed', 0)}")
+                lines.append(f"  Commits flagged: {last_run.get('commits_flagged', 0)}")
                 lines.append("")
-            lines.append("Commit Statistics:")
+
+            # Statistics
+            lines.append("--- Statistics ---")
             for status, count in status_counts.items():
                 if count > 0:
                     lines.append(f"  {status}: {count}")
-            lines.append(f"  Total: {total}")
+            lines.append(f"  TOTAL: {total}")
             lines.append("")
-            lines.append("For detailed reports, use:")
-            lines.append("  docgap review list")
-            lines.append("  docgap log")
+
+            # Commits needing documentation (awaiting Stage 2)
+            if needs_doc:
+                lines.append("-" * 72)
+                lines.append(f"NEEDS DOCUMENTATION ({len(needs_doc)} commits awaiting generation)")
+                lines.append("-" * 72)
+                for c in needs_doc:
+                    lines.append(f"  {c['hash'][:12]}  {c.get('subject', 'N/A')}")
+                    lines.append(f"    Author: {c.get('author', 'N/A')} | Date: {c.get('date', 'N/A')}")
+                    lines.append(f"    Category: {c.get('category', 'N/A')} | Confidence: {c.get('confidence', 'N/A')}")
+                    if c.get("doc_target"):
+                        lines.append(f"    Doc target: {c['doc_target']}")
+                    if c.get("reasoning"):
+                        lines.append(f"    Reasoning: {c['reasoning'][:200]}")
+                    lines.append("")
+
+            # Commits with generated docs (ready for review)
+            if doc_generated:
+                lines.append("-" * 72)
+                lines.append(f"DOCUMENTATION GENERATED ({len(doc_generated)} commits ready for review)")
+                lines.append("-" * 72)
+                for c in doc_generated:
+                    commit_hash = c.get("hash", "")
+                    lines.append(f"  {commit_hash[:12]}  {c.get('subject', 'N/A')}")
+                    lines.append(f"    Author: {c.get('author', 'N/A')} | Date: {c.get('date', 'N/A')}")
+                    lines.append(f"    Category: {c.get('category', 'N/A')} | Confidence: {c.get('confidence', 'N/A')}")
+                    if c.get("doc_target"):
+                        lines.append(f"    Doc target: {c['doc_target']}")
+                    if c.get("reasoning"):
+                        lines.append(f"    Reasoning: {c['reasoning'][:200]}")
+                    # Show output files
+                    commit_output = output_dir / commit_hash
+                    if commit_output.is_dir():
+                        out_files = [f.name for f in sorted(commit_output.iterdir()) if f.is_file()]
+                        lines.append(f"    Output files: {', '.join(out_files)}")
+                        # Include report preview
+                        report_file = commit_output / "report.txt"
+                        if report_file.exists():
+                            preview = report_file.read_text().strip()[:300]
+                            lines.append(f"    Report preview:")
+                            for rline in preview.split("\n"):
+                                lines.append(f"      {rline}")
+                    lines.append("")
+
+            # Uncertain commits (need triage)
+            if uncertain:
+                lines.append("-" * 72)
+                lines.append(f"UNCERTAIN ({len(uncertain)} commits need human triage)")
+                lines.append("-" * 72)
+                for c in uncertain:
+                    lines.append(f"  {c['hash'][:12]}  {c.get('subject', 'N/A')}")
+                    lines.append(f"    Confidence: {c.get('confidence', 'N/A')}")
+                    if c.get("reasoning"):
+                        lines.append(f"    Reasoning: {c['reasoning'][:200]}")
+                    lines.append("")
+
+            # Errors
+            if errors:
+                lines.append("-" * 72)
+                lines.append(f"ERRORS ({len(errors)} commits with processing errors)")
+                lines.append("-" * 72)
+                for c in errors:
+                    lines.append(f"  {c['hash'][:12]}  {c.get('subject', 'N/A')}")
+                    lines.append(f"    Status: {c.get('status', 'N/A')} | Retry count: {c.get('retry_count', 0)}")
+                    if c.get("reasoning"):
+                        lines.append(f"    Error: {c['reasoning'][:200]}")
+                    lines.append("")
+
+            if not needs_doc and not doc_generated and not uncertain and not errors:
+                lines.append("No actionable commits found.")
+                lines.append("")
+
+            lines.append("=" * 72)
+            lines.append("Commands:")
+            lines.append("  docgap review show <hash>     View full details for a commit")
+            lines.append("  docgap review approve <hash>  Approve for documentation")
+            lines.append("  docgap review reject <hash>   Reject as false positive")
+            lines.append("  docgap reprocess --failed      Retry failed commits")
+            lines.append("=" * 72)
+
             content = "\n".join(lines)
 
         # Print to stdout
