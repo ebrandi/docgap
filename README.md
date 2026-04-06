@@ -342,12 +342,31 @@ docgap purge --before 2026-01-01T00:00:00Z --include-output --confirm
 ### Report Generation
 
 ```bash
-# Generate summary report (text)
+# Generate detailed report (prints to stdout)
 docgap report
 
-# Machine-readable JSON output for monitoring scripts
+# JSON format for scripting and monitoring
 docgap report --format json
+
+# Save report to {data_dir}/reports/ with timestamp
+docgap report --save
+
+# Save JSON report to a specific file
+docgap report --format json --output /tmp/docgap-report.json
+
+# Combine: save to reports/ directory in JSON format
+docgap report --format json --save
 ```
+
+The report includes:
+- **Statistics**: commit counts by status
+- **Last run info**: timestamp, status, commits processed/flagged
+- **Commits needing documentation**: hash, subject, author, category, confidence, doc target, LLM reasoning
+- **Generated documentation**: same plus output file listing and report preview
+- **Uncertain commits**: for human triage
+- **Error commits**: status, retry count, error details
+
+Reports pull data from both the SQLite database (commit metadata, classifications) and the output directory (generated files, report previews).
 
 ### Initialization
 
@@ -444,6 +463,8 @@ Generated documentation patches are stored per-commit:
 ├── handbook.patch      # AsciiDoc patch (for handbook targets)
 └── metadata.json       # Classification and generation metadata
 ```
+
+The `docgap report` command reads from this directory to include output file listings and report previews in the generated report.
 
 ### Debug Directory Structure (when `debug.llm_logging` is enabled)
 

@@ -214,16 +214,50 @@ Creates the following subdirectories:
 .Pa <data_dir>/repos/
 .El
 .Ss docgap report
-Generate a summary statistics report across all commit states.
+Generate a detailed documentation report covering all actionable commits.
+The report includes commit statistics, last run information, and detailed
+listings for commits needing documentation, commits with generated docs,
+uncertain commits requiring triage, and error commits.
+.Pp
+Data is gathered from both the SQLite database (commit metadata,
+classifications, and run history) and the output directory (generated
+file listings and report previews from
+.Pa report.txt ) .
 .Bl -tag -width Fl
 .It Fl -format Ar fmt
 Output format.
 .Ar fmt
 may be
 .Cm txt
-(human-readable, default) or
+(human-readable with section headers, default) or
 .Cm json
-(machine-readable).
+(structured data with full commit details for scripting).
+.It Fl -output Ar path
+Save the report to the specified file path.
+The report is also printed to standard output.
+.It Fl -save
+Save the report to the
+.Pa reports/
+subdirectory under
+.Va data_dir
+with a timestamped filename
+(e.g.,
+.Pa report-20260406-140000.txt ) .
+The report is also printed to standard output.
+.El
+.Pp
+The text report organizes commits into sections:
+.Bl -tag -width "DOCUMENTATION GENERATED" -compact
+.It Sy NEEDS DOCUMENTATION
+Commits classified as requiring documentation but not yet generated.
+Shows hash, subject, author, category, confidence, doc target, and reasoning.
+.It Sy DOCUMENTATION GENERATED
+Commits with generated patches ready for review.
+Includes output file listing and a preview of the generated report.
+.It Sy UNCERTAIN
+Commits the LLM could not confidently classify, requiring human triage.
+.It Sy ERRORS
+Commits that encountered processing errors, with retry count and error details.
 .El
 .Ss docgap config show
 Display the active configuration, including all sections and their resolved
@@ -710,10 +744,17 @@ docgap config show
 .Bd -literal -offset indent
 docgap --config /etc/myconfig.yaml status
 .Ed
-.Ss Generate a summary report
+.Ss Generate a detailed report
 .Bd -literal -offset indent
 docgap report
-docgap report --format json
+.Ed
+.Ss Save report to the reports directory
+.Bd -literal -offset indent
+docgap report --save
+.Ed
+.Ss Generate a JSON report for monitoring scripts
+.Bd -literal -offset indent
+docgap report --format json --output /tmp/docgap-report.json
 .Ed
 .Ss Cron setup for automated runs
 Add to

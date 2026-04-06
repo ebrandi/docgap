@@ -184,7 +184,7 @@ Results are persisted in SQLite, output artifacts are stored in a structured dir
 | FR-608 | `docgap review approve --all [--since TIMESTAMP] [--reviewer NAME]` -- bulk approve | `review_approve_bulk()` approves all commits in `needs_doc` or `doc_generated` status |
 | FR-609 | `docgap review reject <hash> [--reason TEXT] [--reviewer NAME]` -- reject a commit | Transitions status to `false_positive`, records reason as feedback |
 | FR-610 | `docgap init` -- initialize database and directories | Creates data directories and runs `init_database()` |
-| FR-611 | `docgap report [--format txt\|json]` -- generate summary report | Outputs commit statistics by status in text or JSON format |
+| FR-611 | `docgap report [--format txt\|json] [--save] [--output PATH]` -- generate detailed report | Outputs commit statistics, last run info, detailed commit listings (needs_doc, doc_generated, uncertain, errors) with per-commit metadata, output file listings, and report previews. Data sourced from both SQLite and output directory. --save writes to {data_dir}/reports/, --output writes to specific path |
 | FR-612 | `docgap config show` -- display current configuration | Iterates all config sections and prints key-value pairs |
 | FR-613 | `docgap --version` -- display version | `@click.version_option()` with `__version__` |
 | FR-614 | `docgap -c/--config PATH` -- specify configuration file path | Global option, default: `config/config.yaml` |
@@ -589,8 +589,15 @@ docgap review reject COMMIT_HASH [--reason TEXT] [--reviewer NAME]
     Reject a commit as not needing documentation.
     Requires status: needs_doc, doc_generated, or uncertain.
 
-docgap report [--format txt|json]
-    Generate summary report with commit statistics.
+docgap report [--format txt|json] [--save] [--output PATH]
+    Generate detailed documentation report.
+    --format txt|json    Output format (default: txt)
+    --save               Save to {data_dir}/reports/ with timestamped filename
+    --output PATH        Save to specific file path
+    Report includes: statistics, last run info, commits needing documentation
+    (with category, confidence, doc_target, reasoning), generated documentation
+    (with output files and report preview), uncertain commits, and errors.
+    Data sourced from SQLite database and output directory files.
 
 docgap config show
     Display all configuration sections with current values.

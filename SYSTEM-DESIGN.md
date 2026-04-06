@@ -401,6 +401,65 @@ flowchart LR
 
 The `/usr/local/etc/docgap/prompts/` directory is created empty by the install script. This is intentional — the system works out of the box with hardcoded defaults. To customize a prompt, drop a `.txt` file with the matching name into that directory.
 
+### 2.11 Report Generator
+
+**Responsibility:** Produce detailed reports combining database metadata with generated output files.
+
+**Data sources:**
+
+```mermaid
+flowchart LR
+    subgraph Sources["Data Sources"]
+        DB[(SQLite DB)]
+        OUT["Output Directory<br/>/var/db/docgap/output/"]
+    end
+
+    subgraph "Report Generator"
+        STATS["Commit counts<br/>by status"]
+        RUNS["Last run info<br/>(timestamp, counts)"]
+        DETAIL["Per-commit detail<br/>(hash, subject, author,<br/>category, confidence,<br/>doc_target, reasoning)"]
+        FILES["Output file listing<br/>(report.txt, *.patch,<br/>metadata.json)"]
+        PREVIEW["Report preview<br/>(first 300 chars<br/>of report.txt)"]
+    end
+
+    subgraph Output["Report Output"]
+        TXT["Text Report<br/>(sectioned, human-readable)"]
+        JSON["JSON Report<br/>(structured, scriptable)"]
+        SAVE["Saved to<br/>{data_dir}/reports/"]
+    end
+
+    DB --> STATS
+    DB --> RUNS
+    DB --> DETAIL
+    OUT --> FILES
+    OUT --> PREVIEW
+    STATS --> TXT
+    STATS --> JSON
+    RUNS --> TXT
+    RUNS --> JSON
+    DETAIL --> TXT
+    DETAIL --> JSON
+    FILES --> TXT
+    FILES --> JSON
+    PREVIEW --> TXT
+    PREVIEW --> JSON
+    TXT --> SAVE
+    JSON --> SAVE
+```
+
+**Report sections (text format):**
+- **Statistics**: aggregate commit counts by status
+- **Needs Documentation**: commits awaiting Stage 2 generation
+- **Documentation Generated**: commits with patches ready for review, including output file listing and report.txt preview
+- **Uncertain**: commits requiring human triage
+- **Errors**: commits with processing failures and retry counts
+
+**Key details:**
+- Reports always print to stdout; `--save` additionally writes to `{data_dir}/reports/`
+- `--output PATH` writes to a specific file
+- JSON format includes full structured data per commit for monitoring integration
+- Output file listings and report previews are read from disk, not stored in the database
+
 ---
 
 ## 3. Data Flow — Complete Pipeline Sequence
