@@ -45,6 +45,8 @@ class OllamaClient:
             retry_delay: Initial delay between retries in seconds
             log_requests: Whether to log requests at DEBUG level
         """
+        if any(c in base_url for c in '\r\n\x00'):
+            raise ValueError("Invalid characters in base_url")
         self.base_url = base_url.rstrip('/')
         parsed = urllib.parse.urlparse(self.base_url)
         if parsed.scheme not in ("http", "https"):
@@ -60,6 +62,10 @@ class OllamaClient:
                 for family, type_, proto, canonname, sockaddr in resolved:
                     ip = ipaddress.ip_address(sockaddr[0])
                     if ip.is_link_local:
+                        raise ValueError(f"Link-local addresses are not allowed as LLM base_url: {parsed.hostname}")
+                    # Check IPv6-mapped IPv4 addresses (e.g., ::ffff:169.254.169.254)
+                    mapped = getattr(ip, 'ipv4_mapped', None)
+                    if mapped and mapped.is_link_local:
                         raise ValueError(f"Link-local addresses are not allowed as LLM base_url: {parsed.hostname}")
             except socket.gaierror:
                 pass  # Unresolvable hostname is not a security issue here

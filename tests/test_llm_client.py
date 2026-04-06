@@ -502,3 +502,28 @@ class TestOllamaClientSSRFProtection:
         """OllamaClient accepts an https:// remote base_url."""
         client = OllamaClient(base_url="https://ollama.example.com", model="test")
         assert client.base_url == "https://ollama.example.com"
+
+    def test_ipv6_mapped_metadata_blocked(self):
+        """IPv6-mapped metadata IP (::ffff:169.254.169.254) should be blocked."""
+        with pytest.raises(ValueError, match="Link-local"):
+            OllamaClient(base_url="http://[::ffff:169.254.169.254]:80")
+
+    def test_ipv6_mapped_metadata_hex_blocked(self):
+        """IPv6-mapped metadata in hex (::ffff:a9fe:a9fe) should be blocked."""
+        with pytest.raises(ValueError, match="Link-local"):
+            OllamaClient(base_url="http://[::ffff:a9fe:a9fe]:80")
+
+    def test_ipv6_localhost_allowed(self):
+        """IPv6 localhost (::1) should be allowed."""
+        client = OllamaClient(base_url="http://[::1]:11434")
+        assert client.base_url == "http://[::1]:11434"
+
+    def test_crlf_in_base_url_rejected(self):
+        """CRLF characters in base_url should be rejected."""
+        with pytest.raises(ValueError, match="Invalid characters"):
+            OllamaClient(base_url="http://localhost:11434\r\nX-Injected: true")
+
+    def test_null_byte_in_base_url_rejected(self):
+        """Null bytes in base_url should be rejected."""
+        with pytest.raises(ValueError, match="Invalid characters"):
+            OllamaClient(base_url="http://localhost:11434\x00evil")

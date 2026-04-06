@@ -94,13 +94,14 @@ class Stage1Detector:
         else:
             classification = Classification.UNCERTAIN
         
-        # Confidence
+        # Confidence -- check NaN/inf BEFORE clamping (min/max masks NaN in CPython)
         confidence = data.get("confidence", 0.0)
         if not isinstance(confidence, (int, float)):
             confidence = 0.0
-        confidence = max(0.0, min(1.0, float(confidence)))
+        confidence = float(confidence)
         if math.isnan(confidence) or math.isinf(confidence):
             confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))
         
         # Category - handle various input formats
         category_str = data.get("category")
