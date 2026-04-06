@@ -336,6 +336,21 @@ class TestDetectorParseLLMResponse:
         assert result.doc_target == "ls.1"
         assert result.reasoning == "New flag"
 
+    def _make_detector(self, temp_dir, test_config):
+        mock_client = MagicMock()
+        mock_fetcher = MagicMock()
+        return Stage1Detector(
+            llm_client=mock_client,
+            git_fetcher=mock_fetcher,
+            config=test_config,
+        )
+
+    def test_nan_confidence_clamped_to_zero(self, temp_dir, test_config):
+        """NaN confidence from LLM should be clamped to 0.0."""
+        detector = self._make_detector(temp_dir, test_config)
+        result = detector._parse_llm_response('{"classification": "NEEDS_DOC", "confidence": "not_a_number"}')
+        assert result.confidence == 0.0
+
 
 class TestClassificationResultIsValid:
     """Test is_valid edge cases."""
@@ -367,6 +382,20 @@ class TestClassificationResultIsValid:
             category=None,
             doc_target=None,
             reasoning=None,
+        )
+        assert result.is_valid() is False
+
+    def test_nan_confidence_is_invalid(self):
+        result = ClassificationResult(
+            classification=Classification.NEEDS_DOC,
+            confidence=float('nan'),
+        )
+        assert result.is_valid() is False
+
+    def test_inf_confidence_is_invalid(self):
+        result = ClassificationResult(
+            classification=Classification.NEEDS_DOC,
+            confidence=float('inf'),
         )
         assert result.is_valid() is False
 

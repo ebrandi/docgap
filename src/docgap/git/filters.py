@@ -1,6 +1,9 @@
 """Pre-filter logic for commit analysis."""
+import logging
 import re
 from typing import Dict, List, Optional, Set
+
+logger = logging.getLogger(__name__)
 
 
 class CommitFilter:
@@ -28,8 +31,8 @@ class CommitFilter:
         for pattern in self.skip_patterns:
             try:
                 self._pattern_regexes.append(re.compile(pattern, re.IGNORECASE))
-            except re.error:
-                pass
+            except re.error as e:
+                logger.warning("Invalid skip pattern ignored: %s: %s", pattern, e)
         
         # Bot email patterns (exact match)
         self._bot_patterns = [p.lower() for p in self.skip_bots]

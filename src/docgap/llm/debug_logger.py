@@ -45,7 +45,10 @@ class LLMDebugLogger:
     def _commit_dir(self, commit_hash: str) -> Path:
         if not re.fullmatch(r"[0-9a-fA-F]{7,64}", commit_hash):
             raise ValueError(f"Invalid commit hash: {commit_hash}")
-        return self._base_dir / commit_hash
+        target = self._base_dir / commit_hash
+        if target.is_symlink():
+            raise ValueError(f"Symlink detected at debug path: {target}")
+        return target
 
     def _pad(self, n: int) -> str:
         return str(n).zfill(2)

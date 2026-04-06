@@ -1,6 +1,7 @@
 """Stage 1 detection - classify commits as needing documentation."""
 import json
 import logging
+import math
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -98,6 +99,8 @@ class Stage1Detector:
         if not isinstance(confidence, (int, float)):
             confidence = 0.0
         confidence = max(0.0, min(1.0, float(confidence)))
+        if math.isnan(confidence) or math.isinf(confidence):
+            confidence = 0.0
         
         # Category - handle various input formats
         category_str = data.get("category")
@@ -115,11 +118,12 @@ class Stage1Detector:
             if category is None:
                 category = Category.OTHER
         
-        # Doc target -- sanitize to prevent path traversal
+        # Doc target -- sanitize to prevent path traversal (including unicode normalization)
         doc_target = data.get("doc_target")
         if doc_target:
-            doc_target = doc_target.strip()
-            if '..' in doc_target or doc_target.startswith('/'):
+            import unicodedata
+            doc_target = unicodedata.normalize('NFKC', doc_target).strip()
+            if '..' in doc_target or doc_target.startswith('/') or '\x00' in doc_target:
                 doc_target = None
             elif len(doc_target) > 500:
                 doc_target = doc_target[:500]

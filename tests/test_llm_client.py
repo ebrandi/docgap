@@ -465,13 +465,33 @@ class TestOllamaClientSSRFProtection:
 
     def test_cloud_metadata_aws_raises_value_error(self):
         """OllamaClient rejects the AWS cloud metadata IP (SSRF protection)."""
-        with pytest.raises(ValueError, match="Cloud metadata"):
+        with pytest.raises(ValueError, match="Link-local"):
             OllamaClient(base_url="http://169.254.169.254", model="test")
 
     def test_cloud_metadata_google_raises_value_error(self):
         """OllamaClient rejects the Google cloud metadata hostname."""
-        with pytest.raises(ValueError, match="Cloud metadata"):
+        with pytest.raises(ValueError, match="Link-local"):
             OllamaClient(base_url="http://metadata.google.internal", model="test")
+
+    def test_hex_ip_metadata_blocked(self):
+        """Hex-encoded metadata IP (0xa9fea9fe = 169.254.169.254) should be blocked."""
+        with pytest.raises(ValueError, match="Link-local"):
+            OllamaClient(base_url="http://0xa9fea9fe")
+
+    def test_decimal_ip_metadata_blocked(self):
+        """Decimal metadata IP (2852039166 = 169.254.169.254) should be blocked."""
+        with pytest.raises(ValueError, match="Link-local"):
+            OllamaClient(base_url="http://2852039166")
+
+    def test_localhost_still_allowed(self):
+        """localhost must remain allowed for local Ollama."""
+        client = OllamaClient(base_url="http://localhost:11434")
+        assert client.base_url == "http://localhost:11434"
+
+    def test_127_0_0_1_still_allowed(self):
+        """127.0.0.1 must remain allowed for local Ollama."""
+        client = OllamaClient(base_url="http://127.0.0.1:11434")
+        assert client.base_url == "http://127.0.0.1:11434"
 
     def test_http_localhost_is_allowed(self):
         """OllamaClient accepts a standard http://localhost base_url."""

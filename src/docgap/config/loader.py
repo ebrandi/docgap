@@ -158,6 +158,24 @@ def validate_config(config_dict: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     if not isinstance(generation.get("max_retries"), int):
         return False, "generation.max_retries must be an integer"
 
+    # Cross-field validation
+    if detection.get("confidence_threshold_accept", 0) < detection.get("confidence_threshold_reject", 0):
+        return False, "confidence_threshold_accept must be >= confidence_threshold_reject"
+
+    # Non-negative integer checks
+    if generation.get("max_retries", 0) < 0:
+        return False, "generation.max_retries must be non-negative"
+    if llm.get("max_context", 0) <= 0:
+        return False, "llm.max_context must be positive"
+
+    # Validate skip_patterns are valid regex
+    import re as re_module
+    for pattern in detection.get("skip_patterns", []):
+        try:
+            re_module.compile(pattern)
+        except re_module.error as e:
+            return False, f"Invalid regex in skip_patterns: {pattern}: {e}"
+
     # Notification config
     notification = config_dict.get("notification", {})
     if not isinstance(notification.get("from_address"), str):

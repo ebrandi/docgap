@@ -525,6 +525,8 @@ class GitFetcher:
 
         if not re.fullmatch(r"[a-zA-Z0-9_./-]+", branch):
             raise ValueError(f"Invalid branch name: {branch}")
+        if branch.startswith('-') or '..' in branch:
+            raise ValueError(f"Invalid branch name: {branch}")
 
         returncode, stdout, stderr = self._run_git(
             ["rev-parse", f"origin/{branch}"],

@@ -137,7 +137,7 @@ class ReprocessRunner:
             click.echo(f"  ERROR: {result['error']}", err=True)
             return result
 
-        retry_count = commit.get("retry_count") or 0
+        retry_count = max(0, commit.get("retry_count") or 0)
         if retry_count >= max_retries:
             result["status"] = "skipped"
             result["error"] = (
@@ -521,7 +521,7 @@ class ReprocessRunner:
         error_commits = db.get_commits_by_statuses(["error", "generation_error"])
         retryable: List[str] = []
         for commit in error_commits:
-            retry_count = commit.get("retry_count") or 0
+            retry_count = max(0, commit.get("retry_count") or 0)
             if retry_count < self.config.generation.max_retries:
                 retryable.append(commit.get("hash", ""))
 

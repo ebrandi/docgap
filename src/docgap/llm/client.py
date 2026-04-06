@@ -1,6 +1,8 @@
 """Ollama HTTP API client."""
+import ipaddress
 import json
 import logging
+import socket
 import time
 import urllib.parse
 from typing import Any, Dict, List, Optional
@@ -47,9 +49,20 @@ class OllamaClient:
         parsed = urllib.parse.urlparse(self.base_url)
         if parsed.scheme not in ("http", "https"):
             raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
-        blocked_hosts = {"169.254.169.254", "metadata.google.internal"}
-        if parsed.hostname in blocked_hosts:
-            raise ValueError("Cloud metadata endpoints are not allowed as LLM base_url")
+        # Block known cloud metadata hostnames that may not resolve in all environments
+        _blocked_hostnames = {"metadata.google.internal"}
+        if parsed.hostname in _blocked_hostnames:
+            raise ValueError(f"Link-local addresses are not allowed as LLM base_url: {parsed.hostname}")
+        # Resolve hostname and check against blocked IP ranges (covers hex/decimal/octal encodings)
+        if parsed.hostname:
+            try:
+                resolved = socket.getaddrinfo(parsed.hostname, None)
+                for family, type_, proto, canonname, sockaddr in resolved:
+                    ip = ipaddress.ip_address(sockaddr[0])
+                    if ip.is_link_local:
+                        raise ValueError(f"Link-local addresses are not allowed as LLM base_url: {parsed.hostname}")
+            except socket.gaierror:
+                pass  # Unresolvable hostname is not a security issue here
         self.model = model
         self.timeout = timeout
         self.connect_timeout = connect_timeout

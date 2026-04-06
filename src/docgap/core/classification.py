@@ -1,4 +1,5 @@
 """Classification dataclasses and enums for Stage 1 detection."""
+import math
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
@@ -66,6 +67,8 @@ class ClassificationResult:
 
     def is_valid(self) -> bool:
         """Check if the classification is valid."""
+        if math.isnan(self.confidence) or math.isinf(self.confidence):
+            return False
         if self.confidence < 0.0 or self.confidence > 1.0:
             return False
         if not isinstance(self.classification, Classification):
