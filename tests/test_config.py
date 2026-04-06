@@ -610,3 +610,117 @@ class TestConfigGetDefaultPath:
             # but we can verify get_default_config_path was called
             runner.invoke(main, ["init"])
             mock_default.assert_called()
+
+
+class TestLoadConfigNonePath:
+    """Test load_config(None) delegates to get_default_config_path."""
+
+    def test_load_config_none_calls_default_path(self, temp_dir):
+        """load_config(None) calls get_default_config_path and loads that file."""
+        from unittest.mock import patch
+        from docgap.config.loader import load_config
+
+        # Write a minimal valid config in tmp_path
+        config_path = temp_dir / "config.yaml"
+        config_path.write_text(f"""
+general:
+  data_dir: {temp_dir}
+  log_level: debug
+
+repositories:
+  freebsd_src:
+    path: {temp_dir}/repos/freebsd-src
+    remote: https://github.com/freebsd/freebsd-src.git
+  freebsd_doc:
+    path: {temp_dir}/repos/freebsd-doc
+    remote: https://github.com/freebsd/freebsd-doc.git
+
+llm:
+  provider: ollama
+  base_url: http://localhost:11434
+  model: test-model
+  temperature: 0.1
+  max_context: 524288
+  timeout: 120
+
+detection:
+  confidence_threshold_accept: 0.80
+  confidence_threshold_reject: 0.50
+  skip_patterns: []
+
+generation:
+  validate_mdoc: false
+  validate_asciidoc: false
+  max_retries: 1
+
+review:
+  auto_submit:
+    enabled: false
+
+notification:
+  enabled: false
+  from_address: test@example.com
+  smtp_host: localhost
+""")
+
+        with patch("docgap.config.loader.get_default_config_path", return_value=config_path) as mock_fn:
+            config = load_config(None)
+            mock_fn.assert_called_once()
+
+        assert config.llm.model == "test-model"
+
+    def test_env_var_base_url_not_applied_because_not_in_allowlist(self, temp_dir, monkeypatch):
+        """DOCGAP_LLM_BASE_URL is not in the allowlist, so it must NOT override the config value."""
+        from docgap.config.loader import load_config
+
+        config_path = temp_dir / "config.yaml"
+        config_path.write_text(f"""
+general:
+  data_dir: {temp_dir}
+  log_level: debug
+
+repositories:
+  freebsd_src:
+    path: {temp_dir}/repos/freebsd-src
+    remote: https://github.com/freebsd/freebsd-src.git
+  freebsd_doc:
+    path: {temp_dir}/repos/freebsd-doc
+    remote: https://github.com/freebsd/freebsd-doc.git
+
+llm:
+  provider: ollama
+  base_url: http://original-url:11434
+  model: my-model
+  temperature: 0.1
+  max_context: 524288
+  timeout: 120
+
+detection:
+  confidence_threshold_accept: 0.80
+  confidence_threshold_reject: 0.50
+  skip_patterns: []
+
+generation:
+  validate_mdoc: false
+  validate_asciidoc: false
+  max_retries: 1
+
+review:
+  auto_submit:
+    enabled: false
+
+notification:
+  enabled: false
+  from_address: test@example.com
+  smtp_host: localhost
+""")
+        # base_url is NOT in the allowlist; model IS.
+        monkeypatch.setenv("DOCGAP_LLM_BASE_URL", "http://injected-url:9999")
+        monkeypatch.setenv("DOCGAP_LLM_MODEL", "env-override-model")
+
+        config = load_config(str(config_path))
+
+        # base_url must NOT be changed by the env var
+        assert config.llm.base_url == "http://original-url:11434"
+        # model must be overridden
+        assert config.llm.model == "env-override-model"

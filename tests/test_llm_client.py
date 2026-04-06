@@ -391,3 +391,94 @@ class TestChatOptionsParam:
         client = OllamaClient(base_url="http://localhost:11434", model="test")
         result = client.chat([{"role": "user", "content": "hi"}], options={"temperature": 0.5})
         assert result == "ok"
+
+
+class TestChatWithDebugLogger:
+    """Test that chat() calls debug_logger methods when configured."""
+
+    @patch("requests.Session.request")
+    def test_chat_calls_log_request_and_log_response(self, mock_request):
+        """chat() invokes debug_logger.log_request before the call and log_response after."""
+        from docgap.llm.debug_logger import LLMCallContext
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"message": {"content": "hello back"}}
+        mock_request.return_value = mock_resp
+
+        client = OllamaClient(base_url="http://localhost:11434", model="test")
+
+        mock_debug_logger = MagicMock()
+        mock_context = LLMCallContext(commit_hash="abc123def456", stage="detect", sequence_num=1)
+
+        client.debug_logger = mock_debug_logger
+        client._call_context = mock_context
+
+        messages = [{"role": "user", "content": "classify this"}]
+        result = client.chat(messages, json_mode=False)
+
+        assert result == "hello back"
+        mock_debug_logger.log_request.assert_called_once_with(
+            mock_context, messages, False, {}
+        )
+        mock_debug_logger.log_response.assert_called_once_with(mock_context, "hello back")
+
+    @patch("requests.Session.request")
+    def test_chat_clears_call_context_after_response(self, mock_request):
+        """chat() sets _call_context to None after a successful response."""
+        from docgap.llm.debug_logger import LLMCallContext
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"message": {"content": "done"}}
+        mock_request.return_value = mock_resp
+
+        client = OllamaClient(base_url="http://localhost:11434", model="test")
+        client.debug_logger = MagicMock()
+        client._call_context = LLMCallContext(commit_hash="abc123def456", stage="gen", sequence_num=2)
+
+        client.chat([{"role": "user", "content": "go"}])
+
+        assert client._call_context is None
+
+    @patch("requests.Session.request")
+    def test_chat_no_debug_logger_does_not_raise(self, mock_request):
+        """chat() works normally when debug_logger is None (default)."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"message": {"content": "plain"}}
+        mock_request.return_value = mock_resp
+
+        client = OllamaClient(base_url="http://localhost:11434", model="test")
+        # debug_logger is None by default; this must not raise
+        result = client.chat([{"role": "user", "content": "hi"}])
+        assert result == "plain"
+
+
+class TestOllamaClientSSRFProtection:
+    """Test that OllamaClient blocks SSRF-prone URLs."""
+
+    def test_ftp_scheme_raises_value_error(self):
+        """OllamaClient rejects ftp:// base_url as unsupported scheme."""
+        with pytest.raises(ValueError, match="Unsupported URL scheme"):
+            OllamaClient(base_url="ftp://evil.com", model="test")
+
+    def test_cloud_metadata_aws_raises_value_error(self):
+        """OllamaClient rejects the AWS cloud metadata IP (SSRF protection)."""
+        with pytest.raises(ValueError, match="Cloud metadata"):
+            OllamaClient(base_url="http://169.254.169.254", model="test")
+
+    def test_cloud_metadata_google_raises_value_error(self):
+        """OllamaClient rejects the Google cloud metadata hostname."""
+        with pytest.raises(ValueError, match="Cloud metadata"):
+            OllamaClient(base_url="http://metadata.google.internal", model="test")
+
+    def test_http_localhost_is_allowed(self):
+        """OllamaClient accepts a standard http://localhost base_url."""
+        client = OllamaClient(base_url="http://localhost:11434", model="test")
+        assert client.base_url == "http://localhost:11434"
+
+    def test_https_remote_is_allowed(self):
+        """OllamaClient accepts an https:// remote base_url."""
+        client = OllamaClient(base_url="https://ollama.example.com", model="test")
+        assert client.base_url == "https://ollama.example.com"

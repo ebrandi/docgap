@@ -1,5 +1,6 @@
 """Email notification system using sendmail."""
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -9,6 +10,18 @@ from typing import Any, Dict, List, Optional
 from docgap.config.schema import Config
 from docgap.core.templates import TemplateEngine
 from docgap.db.database import Database
+
+
+def _sanitize_header(value: str) -> str:
+    """Strip characters that could inject email headers."""
+    return re.sub(r'[\r\n]', ' ', value)
+
+
+def _validate_email(email: str) -> bool:
+    """Basic email validation - reject injection attempts."""
+    if '\r' in email or '\n' in email:
+        return False
+    return bool(re.fullmatch(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", email))
 
 
 @dataclass
@@ -70,9 +83,9 @@ class Notifier:
             Full email message string
         """
         headers = [
-            f"From: {self.from_address}",
-            f"To: {', '.join(recipients)}",
-            f"Subject: {subject}",
+            f"From: {_sanitize_header(self.from_address)}",
+            f"To: {', '.join(_sanitize_header(r) for r in recipients)}",
+            f"Subject: {_sanitize_header(subject)}",
             "Content-Type: text/plain; charset=utf-8",
             f"Date: {datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S UTC')}",
         ]
@@ -129,10 +142,21 @@ class Notifier:
                 subject="",
                 sent_at=datetime.now(timezone.utc).isoformat(),
             )
+
+        # Enforce per-run email rate limit
+        total_sent = self._stats['per_commit_sent'] + self._stats['per_commit_failed']
+        if total_sent >= self.max_emails_per_run:
+            return NotificationResult(
+                success=False,
+                recipients=[],
+                subject="",
+                sent_at=datetime.now(timezone.utc).isoformat(),
+                error="max_emails_per_run limit reached",
+            )
         
         # Get author email
         author_email = commit.get('email', commit.get('author'))
-        if not author_email:
+        if not author_email or not _validate_email(author_email):
             return NotificationResult(
                 success=True,
                 recipients=[],
@@ -176,9 +200,18 @@ class Notifier:
                     sent_at=datetime.now(timezone.utc).isoformat(),
                 )
             
-            # Run sendmail
+            # Run sendmail with explicit recipients (avoid -t header parsing attacks)
+            validated_recipients = [r for r in recipients if _validate_email(r)]
+            if not validated_recipients:
+                return NotificationResult(
+                    success=False,
+                    recipients=recipients,
+                    subject=subject,
+                    sent_at=datetime.now(timezone.utc).isoformat(),
+                    error="No valid recipients after validation",
+                )
             process = subprocess.run(
-                ['/usr/sbin/sendmail', '-t'],
+                ['/usr/sbin/sendmail', '-oi', '--'] + validated_recipients,
                 input=email.encode('utf-8'),
                 capture_output=True,
                 timeout=30,

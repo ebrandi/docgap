@@ -2,7 +2,7 @@
 import tempfile
 import os
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, mock_open, patch
 
 import pytest
 
@@ -70,35 +70,25 @@ class TestValidatorSecurity:
                 assert "validation" in str(e).lower() or "mandoc" in str(e).lower()
 
     def test_path_traversal_in_temp_files(self):
-        """Test that temp file handling is safe from path traversal."""
+        """Test that temp file handling uses a private temp directory."""
         validator = DocValidator()
         # Ensure tools are marked as available so validation runs
         validator.mandoc_available = True
-         
-        # Mock tempfile.NamedTemporaryFile to capture the filename
-        with patch('tempfile.NamedTemporaryFile') as mock_temp:
-            mock_file = Mock()
-            mock_file.name = "/tmp/safe_temp_file.mdoc"
-            mock_file.__enter__ = Mock(return_value=mock_file)
-            mock_file.__exit__ = Mock(return_value=None)
-            mock_temp.return_value = mock_file
-         
-            with patch('subprocess.run') as mock_run:
-                mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
-                 
-                # Test validation
-                validator.validate_mdoc(".Dd 2026-04-03\n.Dt TEST\n.Os\n.Sh NAME\n.Nm test\n.Nd Test\n")
-                 
-                # Verify temp file was created with safe parameters
-                mock_temp.assert_called_once()
-                args, kwargs = mock_temp.call_args
-                # Should not allow arbitrary path specification
-                assert 'suffix' in kwargs
-                assert kwargs['suffix'] == '.mdoc'
-                # Should not allow dir to be set to arbitrary paths
-                if 'dir' in kwargs:
-                    # Should be a safe temporary directory
-                    assert kwargs['dir'] is None or '/tmp' in kwargs['dir']
+
+        with patch('tempfile.mkdtemp', return_value='/tmp/docgap-validate-xyz') as mock_mkdtemp:
+            with patch('os.chmod') as mock_chmod:
+                with patch('builtins.open', mock_open()):
+                    with patch('subprocess.run') as mock_run:
+                        mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
+                        with patch('shutil.rmtree'):
+                            validator.validate_mdoc(".Dd 2026-04-03\n.Dt TEST\n.Os\n.Sh NAME\n.Nm test\n.Nd Test\n")
+
+                            # Verify private temp directory was created
+                            mock_mkdtemp.assert_called_once()
+                            args, kwargs = mock_mkdtemp.call_args
+                            assert kwargs.get('prefix', args[0] if args else '') == 'docgap-validate-'
+                            # Verify directory permissions were restricted
+                            mock_chmod.assert_called_once_with('/tmp/docgap-validate-xyz', 0o700)
 
     def test_validation_tool_output_parsing_safety(self):
         """Test that parsing of validation tool output is safe."""

@@ -100,10 +100,13 @@ class DocValidator:
             )
         
         try:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.mdoc', delete=False) as tmp:
-                tmp.write(content)
-                tmp_path = tmp.name
-            
+            tmpdir = tempfile.mkdtemp(prefix="docgap-validate-")
+            os.chmod(tmpdir, 0o700)
+            tmp_path = os.path.join(tmpdir, "validate.mdoc")
+            fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, 'w') as f:
+                f.write(content)
+
             try:
                 import subprocess
                 result = subprocess.run(
@@ -112,29 +115,26 @@ class DocValidator:
                     text=True,
                     timeout=self.timeout,
                 )
-                
+
                 issues = self._parse_mandoc_output(result.stdout, result.stderr)
-                
+
                 # Update stats
                 if issues.errors:
                     self._stats['mdoc_invalid'] += 1
                 else:
                     self._stats['mdoc_valid'] += 1
-                
+
                 return ValidationResult(
                     valid=not issues.errors,
                     errors=issues.errors,
                     warnings=issues.warnings,
                     format="mdoc",
                 )
-                
+
             finally:
-                # Cleanup temp file
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                    
+                import shutil
+                shutil.rmtree(tmpdir, ignore_errors=True)
+
         except Exception as e:  # pragma: no cover
             return ValidationResult(
                 valid=False,
@@ -162,10 +162,13 @@ class DocValidator:
             )
         
         try:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.adoc', delete=False) as tmp:
-                tmp.write(content)
-                tmp_path = tmp.name
-            
+            tmpdir = tempfile.mkdtemp(prefix="docgap-validate-")
+            os.chmod(tmpdir, 0o700)
+            tmp_path = os.path.join(tmpdir, "validate.adoc")
+            fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, 'w') as f:
+                f.write(content)
+
             try:
                 import subprocess
                 result = subprocess.run(
@@ -174,28 +177,25 @@ class DocValidator:
                     text=True,
                     timeout=self.timeout,
                 )
-                
+
                 issues = self._parse_asciidoc_output(result.stdout, result.stderr)
-                
+
                 # Update stats
                 if issues.errors:
                     self._stats['asciidoc_invalid'] += 1
                 else:
                     self._stats['asciidoc_valid'] += 1
-                
+
                 return ValidationResult(
                     valid=not issues.errors,
                     errors=issues.errors,
                     warnings=issues.warnings,
                     format="asciidoc",
                 )
-                
+
             finally:
-                # Cleanup temp file
-                try:
-                    os.unlink(tmp_path)
-                except OSError:  # pragma: no cover
-                    pass  # pragma: no cover
+                import shutil
+                shutil.rmtree(tmpdir, ignore_errors=True)
 
         except Exception as e:  # pragma: no cover
             return ValidationResult(

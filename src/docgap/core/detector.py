@@ -115,11 +115,19 @@ class Stage1Detector:
             if category is None:
                 category = Category.OTHER
         
-        # Doc target
+        # Doc target -- sanitize to prevent path traversal
         doc_target = data.get("doc_target")
-        
-        # Reasoning
+        if doc_target:
+            doc_target = doc_target.strip()
+            if '..' in doc_target or doc_target.startswith('/'):
+                doc_target = None
+            elif len(doc_target) > 500:
+                doc_target = doc_target[:500]
+
+        # Reasoning -- limit length
         reasoning = data.get("reasoning")
+        if reasoning and len(reasoning) > 2000:
+            reasoning = reasoning[:2000]
         
         return ClassificationResult(
             classification=classification,

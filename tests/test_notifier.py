@@ -504,3 +504,70 @@ class TestSendEmailExceptionPath:
             result = n.send_per_commit(commit)
         assert result.success is False
         assert n.get_statistics()["per_commit_failed"] == 1
+
+
+class TestEmailValidation:
+    """Test _validate_email rejects header-injection attempts."""
+
+    def test_email_with_crlf_bcc_injection_returns_false(self):
+        """_validate_email returns False for email with CRLF Bcc injection."""
+        from docgap.core.notifier import _validate_email
+        assert _validate_email("user@evil.com\r\nBcc: x@x.com") is False
+
+    def test_email_with_bare_newline_returns_false(self):
+        """_validate_email returns False for email containing a bare newline."""
+        from docgap.core.notifier import _validate_email
+        assert _validate_email("user@evil.com\nX-Injected: yes") is False
+
+    def test_email_with_bare_carriage_return_returns_false(self):
+        """_validate_email returns False for email containing a bare carriage return."""
+        from docgap.core.notifier import _validate_email
+        assert _validate_email("user@evil.com\rX-Injected: yes") is False
+
+    def test_valid_email_returns_true(self):
+        """_validate_email returns True for a clean valid email address."""
+        from docgap.core.notifier import _validate_email
+        assert _validate_email("user@freebsd.org") is True
+
+    def test_invalid_email_format_returns_false(self):
+        """_validate_email returns False for an address missing the @ symbol."""
+        from docgap.core.notifier import _validate_email
+        assert _validate_email("notanemail") is False
+
+
+class TestEmailRateLimit:
+    """Test that send_per_commit enforces max_emails_per_run."""
+
+    def test_send_per_commit_blocked_after_max_reached(self, notifier_config, test_db):
+        """send_per_commit returns failure once max_emails_per_run is exhausted."""
+        n = Notifier(config=notifier_config, database=test_db, test_mode=True)
+        # Manually exhaust the per-commit counter
+        n._stats["per_commit_sent"] = n.max_emails_per_run
+
+        commit = {
+            "hash": "abc123def456789",
+            "subject": "Blocked commit",
+            "author": "Dev",
+            "email": "dev@freebsd.org",
+        }
+        result = n.send_per_commit(commit)
+
+        assert result.success is False
+        assert result.error == "max_emails_per_run limit reached"
+        assert result.recipients == []
+
+    def test_send_per_commit_allowed_before_max_reached(self, notifier_config, test_db):
+        """send_per_commit succeeds while under the rate limit."""
+        n = Notifier(config=notifier_config, database=test_db, test_mode=True)
+        n._stats["per_commit_sent"] = n.max_emails_per_run - 1
+
+        commit = {
+            "hash": "abc123def456789",
+            "subject": "Under limit",
+            "author": "Dev",
+            "email": "dev@freebsd.org",
+        }
+        result = n.send_per_commit(commit)
+
+        assert result.success is True
+        assert "dev@freebsd.org" in result.recipients

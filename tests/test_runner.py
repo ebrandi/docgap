@@ -839,3 +839,147 @@ class TestRunnerDryRunPath:
         )
         result = runner.run_pipeline(since_timestamp="2026-04-01", dry_run=True)
         assert result["status"] == "completed"
+
+
+class TestRunnerDebugLoggerInit:
+    """Test that debug logger is initialised when llm_logging is enabled."""
+
+    @patch("docgap.orchestrator.runner.click")
+    @patch("docgap.orchestrator.runner.GitFetcher")
+    @patch("docgap.orchestrator.runner.OllamaClient")
+    @patch("docgap.orchestrator.runner.LogParser")
+    @patch("docgap.orchestrator.runner.Stage1Detector")
+    def test_debug_logger_created_when_llm_logging_enabled(
+        self, MockDetector, MockParser, MockOllama, MockGit, mock_click, runner_config
+    ):
+        """When config.debug.llm_logging is True, an LLMDebugLogger instance is
+        assigned to llm_client.debug_logger before any commits are processed."""
+        from docgap.config.schema import DebugConfig
+
+        # Enable llm_logging BEFORE constructing the runner (config is read at run time).
+        runner_config.debug = DebugConfig(llm_logging=True)
+        runner_config.generation.enabled = False
+
+        from docgap.core.classification import Classification
+
+        MockGit.return_value.ensure_repos.return_value = None
+        # Provide one commit so run_pipeline proceeds past the early "no commits" return
+        # and reaches the LLM client / debug logger initialization block.
+        commit = {
+            "hash": "abc123debug",
+            "author": "T",
+            "email": "t@t.com",
+            "date": "2026-04-03",
+            "subject": "debug test",
+            "files": [],
+        }
+        MockParser.return_value.parse_and_filter.return_value = (
+            [commit], {"total": 1, "filtered_out": 0, "accepted": 1}
+        )
+        mock_cls = MagicMock()
+        mock_cls.classification = Classification.IRRELEVANT
+        mock_cls.confidence = 0.95
+        mock_cls.category = None
+        mock_cls.doc_target = None
+        mock_cls.reasoning = "irrelevant"
+        mock_cls.apply_thresholds.return_value = mock_cls
+        MockDetector.return_value.classify.return_value = mock_cls
+
+        # LLMDebugLogger is imported locally inside run_pipeline via
+        # `from docgap.llm.debug_logger import LLMDebugLogger`.
+        # Patching the class in its home module makes the local import resolve
+        # to our tracking class at execution time.
+        import docgap.llm.debug_logger as _dl_mod
+        original_cls = _dl_mod.LLMDebugLogger
+
+        constructed = []
+
+        class TrackingDebugLogger:
+            def __init__(self, cfg):
+                self.cfg = cfg
+                self.enabled = True
+                constructed.append(self)
+
+            def write_metadata(self, *args, **kwargs):
+                pass
+
+            def rotate_if_needed(self):
+                return 0
+
+        # Use a SimpleNamespace so attribute assignment is plain Python.
+        import types
+        fake_llm_client = types.SimpleNamespace(debug_logger=None)
+        MockOllama.return_value = fake_llm_client
+
+        _dl_mod.LLMDebugLogger = TrackingDebugLogger
+        try:
+            runner = PipelineRunner(runner_config)
+            result = runner.run_pipeline(since_timestamp="2026-04-01T00:00:00Z")
+        finally:
+            _dl_mod.LLMDebugLogger = original_cls
+
+        assert result["status"] == "completed"
+        # TrackingDebugLogger must have been instantiated exactly once.
+        assert len(constructed) == 1
+        # And assigned to the LLM client.
+        assert fake_llm_client.debug_logger is constructed[0]
+
+
+class TestRunnerSkipAlreadyProcessed:
+    """Test that commits already in the DB are skipped with a message."""
+
+    @patch("docgap.orchestrator.runner.click")
+    @patch("docgap.orchestrator.runner.GitFetcher")
+    @patch("docgap.orchestrator.runner.OllamaClient")
+    @patch("docgap.orchestrator.runner.LogParser")
+    @patch("docgap.orchestrator.runner.Stage1Detector")
+    def test_already_processed_commit_is_skipped(
+        self, MockDetector, MockParser, MockOllama, MockGit, mock_click, runner_config, temp_dir
+    ):
+        """A commit whose hash already exists in the DB is skipped without calling classify."""
+        runner = PipelineRunner(runner_config)
+        runner_config.generation.enabled = False
+
+        # Pre-insert a commit into the DB so the runner finds it already processed.
+        db = runner.ensure_database()
+        run_id = db.insert_run({"status": "completed"})
+        db.insert_commit({
+            "run_id": run_id,
+            "hash": "alreadydone1",
+            "author": "T",
+            "email": "t@t.com",
+            "date": "2026-04-03",
+            "subject": "existing",
+            "files": "[]",
+            "status": "irrelevant",
+            "classification": "IRRELEVANT",
+            "confidence": 0.9,
+        })
+        db.close()
+
+        MockGit.return_value.ensure_repos.return_value = None
+        MockParser.return_value.parse_and_filter.return_value = (
+            [
+                {
+                    "hash": "alreadydone1",
+                    "author": "T",
+                    "email": "t@t.com",
+                    "date": "2026-04-03",
+                    "subject": "existing",
+                    "files": [],
+                }
+            ],
+            {"total": 1, "filtered_out": 0, "accepted": 1},
+        )
+
+        result = runner.run_pipeline(since_timestamp="2026-04-01T00:00:00Z")
+
+        # classify must NOT have been called for the skipped commit.
+        MockDetector.return_value.classify.assert_not_called()
+        # commits_processed is not incremented for skipped commits.
+        assert result["commits_processed"] == 0
+        assert result["status"] == "completed"
+
+        # Verify the "Skipping already processed" message was echoed.
+        echo_calls = [str(c) for c in mock_click.echo.call_args_list]
+        assert any("Skipping already processed" in c for c in echo_calls)

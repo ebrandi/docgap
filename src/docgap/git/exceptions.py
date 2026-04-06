@@ -35,7 +35,8 @@ class PullError(GitError):
     """Raised when pulling from a repository fails."""
     def __init__(self, repo_path: str, message: str):
         self.repo_path = repo_path
-        super().__init__(f"Failed to pull from {repo_path}: {message}")
+        safe_msg = _sanitize_url(message[:500])
+        super().__init__(f"Failed to pull from {repo_path}: {safe_msg}")
 
 
 class CommitNotFoundError(GitError):
@@ -49,8 +50,8 @@ class CommitNotFoundError(GitError):
 class GitCommandError(GitError):
     """Raised when a git command fails."""
     def __init__(self, command: list[str], returncode: int, stderr: str):
-        self.command = command
+        self.command = [_sanitize_url(c) for c in command]
         self.returncode = returncode
-        self.stderr = stderr[:500]
-        message = f"Git command failed (return code {returncode}): {stderr[:500]}"
+        self.stderr = _sanitize_url(stderr[:500])
+        message = f"Git command failed (return code {returncode}): {self.stderr}"
         super().__init__(message)

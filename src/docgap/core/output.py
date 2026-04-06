@@ -1,6 +1,7 @@
 """Output manager for saving documentation generation results."""
 import json
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,8 +24,12 @@ class OutputManager:
         self.config = config
         self.base_dir = Path(config.general.data_dir) / "output"
         
-        # Create base directory if it doesn't exist
+        # Create base directory if it doesn't exist, with restricted permissions
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(str(self.base_dir), 0o700)
+        except OSError:
+            pass
         
         # Statistics
         self._stats = {
@@ -35,24 +40,28 @@ class OutputManager:
     
     def _get_output_dir(self, commit_hash: str) -> Path:
         """Get output directory for a commit.
-        
+
         Args:
             commit_hash: Commit hash
-            
+
         Returns:
             Path to output directory
         """
+        if not re.fullmatch(r"[0-9a-fA-F]{4,64}", commit_hash):
+            raise ValueError(f"Invalid commit hash: {commit_hash}")
         return self.base_dir / commit_hash[:2] / commit_hash
     
     def _get_output_dir_flat(self, commit_hash: str) -> Path:
         """Get output directory for a commit (flat structure).
-        
+
         Args:
             commit_hash: Commit hash
-            
+
         Returns:
             Path to output directory
         """
+        if not re.fullmatch(r"[0-9a-fA-F]{4,64}", commit_hash):
+            raise ValueError(f"Invalid commit hash: {commit_hash}")
         return self.base_dir / commit_hash
     
     def save_output(
@@ -73,9 +82,13 @@ class OutputManager:
         Returns:
             Dictionary mapping filename to path
         """
-        # Create output directory
+        # Create output directory with restricted permissions
         output_dir = self._get_output_dir_flat(commit_hash)
         output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(str(output_dir), 0o700)
+        except OSError:
+            pass
         
         saved_files: Dict[str, Path] = {}
         

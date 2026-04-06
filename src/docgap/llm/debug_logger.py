@@ -52,6 +52,10 @@ class LLMDebugLogger:
 
     def _atomic_write(self, path: Path, content: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(str(path.parent), 0o700)
+        except OSError:
+            pass
         fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:

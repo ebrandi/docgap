@@ -349,7 +349,7 @@ class TestLogParserParseGitLogLineEdgeCases:
 
     def test_subject_with_pipes(self, temp_dir, test_config):
         parser = LogParser(None, test_config)
-        result = parser._parse_git_log_line("hash|author|email|date|subject|with|pipes")
+        result = parser._parse_git_log_line("abc1234|author|email|date|subject|with|pipes")
         assert result is not None
         assert result["subject"] == "subject|with|pipes"
 
@@ -360,3 +360,50 @@ class TestLogParserNoConfig:
     def test_init_no_config(self):
         parser = LogParser(None, None)
         assert parser.filter is not None
+
+
+class TestLogParserInvalidBranch:
+    """Test branch name validation in parse_commits."""
+
+    def test_parse_commits_invalid_branch_raises_value_error(self, temp_dir, test_config):
+        """parse_commits raises ValueError when branch name contains shell-special characters."""
+        mock_fetcher = MagicMock()
+        mock_fetcher.src_path = temp_dir
+        parser = LogParser(mock_fetcher, test_config)
+        # Semicolons are not in the allowlist regex [a-zA-Z0-9_./-]+
+        with pytest.raises(ValueError, match="Invalid branch name"):
+            parser.parse_commits(branch="main; rm -rf /")
+
+    def test_parse_commits_invalid_branch_with_spaces(self, temp_dir, test_config):
+        """parse_commits raises ValueError for branch names containing spaces."""
+        mock_fetcher = MagicMock()
+        mock_fetcher.src_path = temp_dir
+        parser = LogParser(mock_fetcher, test_config)
+        with pytest.raises(ValueError, match="Invalid branch name"):
+            parser.parse_commits(branch="main branch")
+
+
+class TestParseGitLogLineInvalidHash:
+    """Test _parse_git_log_line rejects non-hex hashes."""
+
+    def test_non_hex_hash_returns_none(self, temp_dir, test_config):
+        """_parse_git_log_line returns None when the hash field is not hexadecimal."""
+        parser = LogParser(None, test_config)
+        line = "ZZZZZZZZ|Author|author@example.com|2026-04-06T10:00:00Z|Subject"
+        result = parser._parse_git_log_line(line)
+        assert result is None
+
+    def test_too_short_hash_returns_none(self, temp_dir, test_config):
+        """_parse_git_log_line returns None when the hash is shorter than 4 hex chars."""
+        parser = LogParser(None, test_config)
+        line = "ab|Author|author@example.com|2026-04-06T10:00:00Z|Subject"
+        result = parser._parse_git_log_line(line)
+        assert result is None
+
+    def test_valid_short_hash_is_accepted(self, temp_dir, test_config):
+        """_parse_git_log_line accepts hashes with at least 4 hex characters."""
+        parser = LogParser(None, test_config)
+        line = "abcd|Author|author@example.com|2026-04-06T10:00:00Z|Subject"
+        result = parser._parse_git_log_line(line)
+        assert result is not None
+        assert result["hash"] == "abcd"

@@ -69,11 +69,21 @@ def load_env_overrides(
                     env_overrides[section] = {}
                 env_overrides[section][field_name] = value
 
-    # Apply overrides recursively
+    # Allowlist of fields that can be overridden via environment variables
+    env_overridable = {
+        "general": {"data_dir", "log_level"},
+        "llm": {"model", "temperature", "timeout", "max_context"},
+        "detection": {"confidence_threshold_accept", "confidence_threshold_reject"},
+        "generation": {"enabled", "validate_mdoc", "validate_asciidoc", "max_retries"},
+        "notification": {"enabled", "committer_notify", "digest_only_if_findings"},
+        "debug": {"llm_logging", "max_debug_entries"},
+    }
+
+    # Apply overrides only for allowlisted fields
     for section, overrides in env_overrides.items():
-        if section in config_dict:
+        if section in config_dict and section in env_overridable:
             for field, value in overrides.items():
-                if field in config_dict[section]:
+                if field in env_overridable[section] and field in config_dict[section]:
                     config_dict[section][field] = convert_value(value, config_dict[section][field])
 
     return config_dict

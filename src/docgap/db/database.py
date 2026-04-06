@@ -1,4 +1,5 @@
 """Main database class with CRUD operations."""
+import os
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -92,9 +93,11 @@ class Database:
             conn.commit()
         
         # Set schema version
-        cursor.execute(f"PRAGMA user_version = {get_schema_version()}")
+        # Note: PRAGMA does not support ? parameter binding in SQLite
+        version = int(get_schema_version())
+        cursor.execute(f"PRAGMA user_version = {version}")
         conn.commit()
-    
+
     # ==================== Run Operations ====================
     
     def insert_run(self, run_data: Dict[str, Any]) -> int:
@@ -641,7 +644,11 @@ def init_database(db_path: str) -> None:
     # Delete existing database if present
     if path.exists():
         path.unlink()
-    
+
+    # Create file with restricted permissions before SQLite opens it
+    fd = os.open(str(path), os.O_CREAT | os.O_WRONLY, 0o600)
+    os.close(fd)
+
     # Create connection and initialize schema
     conn = sqlite3.connect(db_path, timeout=30)
     conn.execute("PRAGMA journal_mode=WAL")
@@ -651,7 +658,9 @@ def init_database(db_path: str) -> None:
     cursor.executescript(SCHEMA)
     
     # Set schema version
-    cursor.execute(f"PRAGMA user_version = {get_schema_version()}")
+    # Note: PRAGMA does not support ? parameter binding in SQLite
+    version = int(get_schema_version())
+    cursor.execute(f"PRAGMA user_version = {version}")
     
     conn.commit()
     conn.close()

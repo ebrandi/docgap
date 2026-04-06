@@ -338,3 +338,129 @@ class TestRotateIfNeeded:
         rotated = logger.rotate_if_needed()
 
         assert rotated == 0
+
+    def test_rmtree_failure_is_silently_ignored(self, tmp_path):
+        """rotate_if_needed continues without crashing when shutil.rmtree raises OSError."""
+        import shutil
+        from unittest.mock import patch
+
+        config = _make_config(tmp_path, llm_logging=True, max_debug_entries=1)
+        logger = LLMDebugLogger(config)
+        base = tmp_path / "debug"
+        base.mkdir(parents=True)
+        # Two dirs so the oldest one will be scheduled for removal.
+        for name in ["d1", "d2"]:
+            d = base / name
+            d.mkdir()
+            (d / "f").write_text("x")
+
+        with patch("shutil.rmtree", side_effect=OSError("permission denied")):
+            rotated = logger.rotate_if_needed()
+
+        # rotated should be 0 because rmtree failed each time.
+        assert rotated == 0
+        # Both dirs still exist because deletion was skipped.
+        remaining = [d for d in base.iterdir() if d.is_dir()]
+        assert len(remaining) == 2
+
+
+class TestAtomicWrite:
+    """Test _atomic_write internals."""
+
+    def test_chmod_called_on_parent_directory(self, tmp_path):
+        """_atomic_write calls os.chmod(parent, 0o700) when it succeeds."""
+        import os
+        from unittest.mock import patch, call
+
+        config = _make_config(tmp_path, llm_logging=True)
+        logger = LLMDebugLogger(config)
+        dest = tmp_path / "subdir" / "file.txt"
+
+        chmod_calls = []
+        original_chmod = os.chmod
+
+        def recording_chmod(path, mode):
+            chmod_calls.append((path, mode))
+            # Allow real chmod to run so the path actually gets set.
+            try:
+                original_chmod(path, mode)
+            except OSError:
+                pass
+
+        with patch("os.chmod", side_effect=recording_chmod):
+            logger._atomic_write(dest, "content")
+
+        parent_str = str(dest.parent)
+        assert any(path == parent_str and mode == 0o700 for path, mode in chmod_calls)
+
+    def test_fdopen_failure_cleans_up_temp_file_and_reraises(self, tmp_path):
+        """_atomic_write removes the temp file and re-raises if os.fdopen raises."""
+        import os
+        import tempfile
+        from unittest.mock import patch
+
+        config = _make_config(tmp_path, llm_logging=True)
+        logger = LLMDebugLogger(config)
+        dest = tmp_path / "output.txt"
+
+        created_tmp_files = []
+        original_mkstemp = tempfile.mkstemp
+
+        def recording_mkstemp(**kw):
+            fd, tmp = original_mkstemp(**kw)
+            created_tmp_files.append(tmp)
+            return fd, tmp
+
+        with patch("tempfile.mkstemp", side_effect=recording_mkstemp):
+            with patch("os.fdopen", side_effect=IOError("disk full")):
+                with pytest.raises(IOError, match="disk full"):
+                    logger._atomic_write(dest, "hello")
+
+        # The temp file must have been cleaned up.
+        for tmp in created_tmp_files:
+            assert not Path(tmp).exists(), f"Temp file {tmp} was not cleaned up"
+
+
+# ---------------------------------------------------------------------------
+# _commit_dir hash validation (security hardening)
+# ---------------------------------------------------------------------------
+
+class TestCommitDirHashValidation:
+    """Test that _commit_dir raises ValueError for invalid or malicious hashes."""
+
+    def test_path_traversal_raises_value_error(self, tmp_path):
+        """_commit_dir raises ValueError for a hash containing path traversal."""
+        logger = LLMDebugLogger(_make_config(tmp_path, llm_logging=True))
+        with pytest.raises(ValueError, match="Invalid commit hash"):
+            logger._commit_dir("../../../etc")
+
+    def test_absolute_path_hash_raises_value_error(self, tmp_path):
+        """_commit_dir raises ValueError for a hash that is an absolute path."""
+        logger = LLMDebugLogger(_make_config(tmp_path, llm_logging=True))
+        with pytest.raises(ValueError, match="Invalid commit hash"):
+            logger._commit_dir("/etc/passwd")
+
+    def test_non_hex_characters_raise_value_error(self, tmp_path):
+        """_commit_dir raises ValueError for a hash containing non-hex characters."""
+        logger = LLMDebugLogger(_make_config(tmp_path, llm_logging=True))
+        with pytest.raises(ValueError, match="Invalid commit hash"):
+            logger._commit_dir("zzzzzzzzzzzzzz")
+
+    def test_empty_string_raises_value_error(self, tmp_path):
+        """_commit_dir raises ValueError for an empty string hash."""
+        logger = LLMDebugLogger(_make_config(tmp_path, llm_logging=True))
+        with pytest.raises(ValueError, match="Invalid commit hash"):
+            logger._commit_dir("")
+
+    def test_valid_short_hex_hash_returns_path(self, tmp_path):
+        """_commit_dir returns a Path under base_dir for a valid hex commit hash."""
+        logger = LLMDebugLogger(_make_config(tmp_path, llm_logging=True))
+        path = logger._commit_dir("abc123def456")
+        assert path.name == "abc123def456"
+
+    def test_valid_full_sha256_hash_returns_path(self, tmp_path):
+        """_commit_dir accepts a full 64-character hex hash."""
+        logger = LLMDebugLogger(_make_config(tmp_path, llm_logging=True))
+        full_hash = "a" * 64
+        path = logger._commit_dir(full_hash)
+        assert path.name == full_hash

@@ -2,6 +2,7 @@
 import dataclasses
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +28,9 @@ def get_config(cli_obj) -> Config:
     return cli_obj.config
 
 
+_REDACTED_PATTERN = re.compile(r"(?i)(password|secret|token|key|credential)")
+
+
 def config_show_command(cli_obj) -> int:
     """Display all configuration sections."""
     try:
@@ -37,7 +41,10 @@ def config_show_command(cli_obj) -> int:
             click.echo(f"[{section_name}]")
             if isinstance(section_value, dict):
                 for key, value in section_value.items():
-                    click.echo(f"  {key}: {value}")
+                    if _REDACTED_PATTERN.search(key):
+                        click.echo(f"  {key}: [REDACTED]")
+                    else:
+                        click.echo(f"  {key}: {value}")
             else:  # pragma: no cover
                 click.echo(f"  {section_value}")
             click.echo()
@@ -225,6 +232,9 @@ def review_list(cli_obj) -> int:
 def review_show(cli_obj, commit_hash: str) -> int:
     """Show review details for a commit."""
     try:
+        if not validate_commit_hash(commit_hash):
+            click.echo(f"Error: invalid commit hash: {commit_hash}", err=True)
+            return 1
         config = get_config(cli_obj)
         db_path = Path(config.general.data_dir) / "docgap.sqlite"
         output_path = Path(config.general.data_dir) / "output" / commit_hash
@@ -286,6 +296,9 @@ def review_show(cli_obj, commit_hash: str) -> int:
 def review_approve(cli_obj, commit_hash: str, reviewer: Optional[str] = None) -> int:
     """Approve a commit for documentation update."""
     try:
+        if not validate_commit_hash(commit_hash):
+            click.echo(f"Error: invalid commit hash: {commit_hash}", err=True)
+            return 1
         config = get_config(cli_obj)
         db_path = Path(config.general.data_dir) / "docgap.sqlite"
 
@@ -328,6 +341,9 @@ def review_approve(cli_obj, commit_hash: str, reviewer: Optional[str] = None) ->
 def review_reject(cli_obj, commit_hash: str, reason: Optional[str] = None, reviewer: Optional[str] = None) -> int:
     """Reject a commit - no documentation needed."""
     try:
+        if not validate_commit_hash(commit_hash):
+            click.echo(f"Error: invalid commit hash: {commit_hash}", err=True)
+            return 1
         config = get_config(cli_obj)
         db_path = Path(config.general.data_dir) / "docgap.sqlite"
 
@@ -377,10 +393,13 @@ def init_command(cli_obj) -> int:
         config = get_config(cli_obj)
         data_dir = Path(config.general.data_dir)
 
-        # Create directories
+        # Create directories with restricted permissions
         data_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(str(data_dir), 0o700)
         (data_dir / "output").mkdir(exist_ok=True)
+        os.chmod(str(data_dir / "output"), 0o700)
         (data_dir / "repos").mkdir(exist_ok=True)
+        os.chmod(str(data_dir / "repos"), 0o700)
 
         # Initialize database
         db_path = data_dir / "docgap.sqlite"
@@ -410,8 +429,11 @@ def _format_commit_detail(commit: Dict[str, Any], output_dir: Path) -> Dict[str,
         "reasoning": commit.get("reasoning"),
         "status": commit.get("status", ""),
     }
-    # Check for output files
-    commit_output = output_dir / commit.get("hash", "")
+    # Check for output files (re-validate hash from DB for defense-in-depth)
+    commit_hash_val = commit.get("hash", "")
+    if not validate_commit_hash(commit_hash_val):
+        return detail
+    commit_output = output_dir / commit_hash_val
     if commit_output.is_dir():
         detail["output_files"] = [f.name for f in sorted(commit_output.iterdir()) if f.is_file()]
         report_file = commit_output / "report.txt"
@@ -522,7 +544,10 @@ def report_command(cli_obj, output_format: str = "txt", output_file: Optional[st
                         lines.append(f"    Doc target: {c['doc_target']}")
                     if c.get("reasoning"):
                         lines.append(f"    Reasoning: {c['reasoning'][:200]}")
-                    # Show output files
+                    # Show output files (validate hash before path construction)
+                    if not validate_commit_hash(commit_hash):
+                        lines.append("")
+                        continue
                     commit_output = output_dir / commit_hash
                     if commit_output.is_dir():
                         out_files = [f.name for f in sorted(commit_output.iterdir()) if f.is_file()]
@@ -590,7 +615,10 @@ def report_command(cli_obj, output_format: str = "txt", output_file: Optional[st
 
         if dest:
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(content + "\n")
+            # Write with restricted permissions (reports may contain PII)
+            fd = os.open(str(dest), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, 'w') as f:
+                f.write(content + "\n")
             click.echo(f"\nReport saved to: {dest}")
 
         return 0
@@ -675,6 +703,15 @@ def reprocess_command(
     """Reprocess failed or incomplete commits through the pipeline."""
     try:
         config = get_config(cli_obj)
+        if commit_hash and not validate_commit_hash(commit_hash):
+            click.echo(f"Error: invalid commit hash: {commit_hash}", err=True)
+            return 1
+        if stage1_hash and not validate_commit_hash(stage1_hash):
+            click.echo(f"Error: invalid commit hash: {stage1_hash}", err=True)
+            return 1
+        if stage2_hash and not validate_commit_hash(stage2_hash):
+            click.echo(f"Error: invalid commit hash: {stage2_hash}", err=True)
+            return 1
         from docgap.orchestrator.reprocessor import ReprocessRunner
         runner = ReprocessRunner(config)
 
@@ -822,16 +859,15 @@ def validate_command(cli_obj) -> int:
         return 1
 
 
-def _validate_commit_hash(commit_hash: str) -> bool:
+def validate_commit_hash(commit_hash: str) -> bool:
     """Validate that a string looks like a hex commit hash."""
-    import re
-    return bool(re.fullmatch(r"[0-9a-fA-F]{7,64}", commit_hash))
+    return bool(re.fullmatch(r"[0-9a-fA-F]{4,64}", commit_hash))
 
 
 def reset_command(cli_obj, commit_hash: str, confirm: bool = False) -> int:
     """Reset a commit to 'pending' status for full reprocessing."""
     try:
-        if not _validate_commit_hash(commit_hash):
+        if not validate_commit_hash(commit_hash):
             click.echo(f"Error: invalid commit hash: {commit_hash}", err=True)
             return 1
         config = get_config(cli_obj)
@@ -947,6 +983,8 @@ def purge_command(
             import shutil
             removed = 0
             for h in output_hashes:
+                if not validate_commit_hash(h):
+                    continue
                 output_dir = Path(config.general.data_dir) / "output" / h
                 if output_dir.exists():
                     shutil.rmtree(output_dir)

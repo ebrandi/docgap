@@ -1,4 +1,5 @@
 """Git repository management for FreeBSD."""
+import os
 import re
 import subprocess
 import time
@@ -70,11 +71,11 @@ class GitFetcher:
         self.doc_remote_url = self._build_remote_url(self.doc_remote or "")
     
     def _build_remote_url(self, url: str) -> str:
-        """Build remote URL with optional authentication token."""
-        if self.auth_token:
-            # Insert token into HTTPS URL
-            if url.startswith("https://"):
-                return url.replace("https://", f"https://{self.auth_token}@")
+        """Build remote URL -- returns clean URL without embedded credentials.
+
+        Authentication is handled via credential.helper in _run_git() to avoid
+        leaking tokens in /proc/<pid>/cmdline or process listings.
+        """
         return url
     
     def _run_git(
@@ -102,14 +103,30 @@ class GitFetcher:
         """
         # Add safe.directory config to avoid "dubious ownership" errors
         # when the repo was cloned by a different user (e.g., root via sudo)
-        safe_dir = str(repo_path) if repo_path else "*"
-        cmd = ["git", "-c", f"safe.directory={safe_dir}"] + args
+        safe_dir = str(repo_path) if repo_path else "."
+        cmd = ["git", "-c", f"safe.directory={safe_dir}"]
+
+        # Pass auth token via credential helper to avoid leaking in /proc/cmdline
+        # Use minimal environment to limit blast radius
+        env = None
+        if self.auth_token:
+            env = {
+                "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"),
+                "HOME": os.environ.get("HOME", "/"),
+                "USER": os.environ.get("USER", ""),
+                "LANG": os.environ.get("LANG", "C"),
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_AUTH_TOKEN": self.auth_token,
+            }
+            cmd.extend(["-c", "credential.helper=!f() { echo \"password=$GIT_AUTH_TOKEN\"; }; f"])
+
+        cmd.extend(args)
 
         workdir = str(repo_path) if repo_path else None
         cmd_timeout = timeout if timeout is not None else self.timeout
-        
+
         last_error: Optional[Exception] = None
-        
+
         for attempt in range(self.max_retries):
             try:
                 result = subprocess.run(
@@ -119,6 +136,7 @@ class GitFetcher:
                     cwd=workdir,
                     timeout=cmd_timeout,
                     check=False,
+                    env=env,
                 )
                 
                 if check and result.returncode != 0:
@@ -196,8 +214,7 @@ class GitFetcher:
 
         cmd.extend([remote_url, str(repo_path)])
 
-        # Show progress to terminal unless auth token is in the URL
-        # (git --progress writes the remote URL which would leak the token)
+        # Show progress to terminal unless auth token is configured
         show_progress = not self.auth_token
 
         returncode, stdout, stderr = self._run_git(
@@ -309,6 +326,7 @@ class GitFetcher:
                     "-1",
                     "--format=%H|%an|%ae|%aI|%s",
                     commit_hash,
+                    "--",
                 ],
                 repo_path=repo_path,
             )
@@ -355,7 +373,7 @@ class GitFetcher:
         
         try:
             returncode, stdout, stderr = self._run_git(
-                ["diff", f"{commit_hash}^..{commit_hash}"],
+                ["diff", f"{commit_hash}^..{commit_hash}", "--"],
                 repo_path=repo_path,
             )
             
@@ -474,7 +492,7 @@ class GitFetcher:
         
         try:
             returncode, stdout, stderr = self._run_git(
-                ["diff-tree", "--no-commit-id", "--name-only", "-r", commit_hash],
+                ["diff-tree", "--no-commit-id", "--name-only", "-r", commit_hash, "--"],
                 repo_path=repo_path,
             )
             
@@ -504,7 +522,10 @@ class GitFetcher:
         
         if not self._repo_exists(repo_path):
             raise GitError(f"Repository not found: {repo_path}")
-        
+
+        if not re.fullmatch(r"[a-zA-Z0-9_./-]+", branch):
+            raise ValueError(f"Invalid branch name: {branch}")
+
         returncode, stdout, stderr = self._run_git(
             ["rev-parse", f"origin/{branch}"],
             repo_path=repo_path,

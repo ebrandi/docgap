@@ -124,13 +124,17 @@ class TestGitFetcherAuthToken:
     """Test auth token URL building."""
 
     def test_auth_token_url(self):
+        """Auth token must NOT be embedded in URL (passed via credential helper instead)."""
         fetcher = GitFetcher(
             src_path="/tmp/src",
             src_remote="https://github.com/test/test.git",
             auth_token="mytoken123",
         )
-        assert "mytoken123@" in fetcher.src_remote_url
-        assert fetcher.src_remote_url.startswith("https://mytoken123@github.com")
+        # Token must not appear in the URL (prevents /proc/cmdline leakage)
+        assert "mytoken123" not in fetcher.src_remote_url
+        assert fetcher.src_remote_url == "https://github.com/test/test.git"
+        # Token is stored for credential helper use
+        assert fetcher.auth_token == "mytoken123"
 
     def test_no_auth_token(self):
         fetcher = GitFetcher(
@@ -591,3 +595,86 @@ class TestGetDiffNonZeroReturn:
              patch.object(fetcher, '_run_git', return_value=(1, "", "")):
             with pytest.raises(CommitNotFoundError):
                 fetcher.get_diff("badcommit")
+
+
+class TestGitFetcherAuthTokenCredentialHelper:
+    """Test that auth_token causes _run_git to pass credential helper args and env."""
+
+    @patch("subprocess.run")
+    def test_run_git_includes_credential_helper_and_env(self, mock_run):
+        """When auth_token is set, git command includes credential.helper and GIT_AUTH_TOKEN env."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "abc123\n"
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        fetcher = GitFetcher(
+            src_path="/tmp/src",
+            src_remote="https://github.com/test/test.git",
+            auth_token="supersecret",
+            max_retries=1,
+        )
+
+        fetcher._run_git(["rev-parse", "HEAD"], repo_path=Path("/tmp/src"))
+
+        assert mock_run.called
+        call_kwargs = mock_run.call_args
+        cmd = call_kwargs[0][0]
+        env = call_kwargs[1].get("env") or call_kwargs[0][1] if len(call_kwargs[0]) > 1 else call_kwargs[1].get("env")
+        # credential.helper must be in the command
+        assert "credential.helper" in " ".join(cmd)
+        # GIT_AUTH_TOKEN must be in the environment
+        assert env is not None
+        assert env.get("GIT_AUTH_TOKEN") == "supersecret"
+
+    @patch("subprocess.run")
+    def test_run_git_no_auth_token_has_no_credential_helper(self, mock_run):
+        """When no auth_token is set, git command does not include credential.helper."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "abc123\n"
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        fetcher = GitFetcher(
+            src_path="/tmp/src",
+            src_remote="https://github.com/test/test.git",
+            max_retries=1,
+        )
+
+        fetcher._run_git(["rev-parse", "HEAD"], repo_path=Path("/tmp/src"))
+
+        cmd = mock_run.call_args[0][0]
+        assert "credential.helper" not in " ".join(cmd)
+        # env should be None (no override)
+        env = mock_run.call_args[1].get("env")
+        assert env is None
+
+
+class TestGetLatestCommitHashInvalidBranch:
+    """Test branch name validation in get_latest_commit_hash."""
+
+    def test_invalid_branch_raises_value_error(self, temp_dir):
+        """get_latest_commit_hash raises ValueError for branch names with shell-special chars."""
+        fetcher = GitFetcher(
+            src_path=str(temp_dir),
+            src_remote="https://github.com/test/test.git",
+        )
+        # Branch validation runs before _run_git; mock both to isolate the check.
+        # The regex [a-zA-Z0-9_./-]+ disallows semicolons, spaces, etc.
+        with patch.object(fetcher, '_repo_exists', return_value=True), \
+             patch.object(fetcher, '_run_git', return_value=(0, "abc123\n", "")):
+            with pytest.raises(ValueError, match="Invalid branch name"):
+                fetcher.get_latest_commit_hash(branch="main; echo pwned")
+
+    def test_invalid_branch_with_spaces(self, temp_dir):
+        """get_latest_commit_hash raises ValueError for branch names containing spaces."""
+        fetcher = GitFetcher(
+            src_path=str(temp_dir),
+            src_remote="https://github.com/test/test.git",
+        )
+        with patch.object(fetcher, '_repo_exists', return_value=True), \
+             patch.object(fetcher, '_run_git', return_value=(0, "abc123\n", "")):
+            with pytest.raises(ValueError, match="Invalid branch name"):
+                fetcher.get_latest_commit_hash(branch="main branch")

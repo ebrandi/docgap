@@ -215,15 +215,15 @@ class TestCLIStateMachine:
         db = Database(str(temp_dir / "docgap.sqlite"))
         run_id = db.insert_run({"status": "completed"})
         db.insert_commit({
-            "run_id": run_id, "hash": "audit1", "status": "needs_doc",
+            "run_id": run_id, "hash": "a4d17001", "status": "needs_doc",
             "author": "A", "email": "a@a", "date": "2026-04-03",
             "subject": "test", "files": [],
         })
         db.close()
-        result = runner.invoke(main, ["--config", str(config_path), "review", "approve", "audit1"])
+        result = runner.invoke(main, ["--config", str(config_path), "review", "approve", "a4d17001"])
         assert result.exit_code == 0
         db = Database(str(temp_dir / "docgap.sqlite"))
-        commit = db.get_commit_by_hash("audit1")
+        commit = db.get_commit_by_hash("a4d17001")
         assert commit["status"] == "reviewed"
         assert commit["reviewer"] is not None
         assert commit["reviewed_at"] is not None
@@ -239,18 +239,18 @@ class TestCLIStateMachine:
         db = Database(str(temp_dir / "docgap.sqlite"))
         run_id = db.insert_run({"status": "completed"})
         db.insert_commit({
-            "run_id": run_id, "hash": "audit2", "status": "needs_doc",
+            "run_id": run_id, "hash": "a4d17002", "status": "needs_doc",
             "author": "A", "email": "a@a", "date": "2026-04-03",
             "subject": "test", "files": [],
         })
         db.close()
         result = runner.invoke(
             main,
-            ["--config", str(config_path), "review", "reject", "audit2", "--reason", "not relevant"],
+            ["--config", str(config_path), "review", "reject", "a4d17002", "--reason", "not relevant"],
         )
         assert result.exit_code == 0
         db = Database(str(temp_dir / "docgap.sqlite"))
-        commit = db.get_commit_by_hash("audit2")
+        commit = db.get_commit_by_hash("a4d17002")
         assert commit["status"] == "false_positive"
         assert commit["feedback"] == "not relevant"
         db.close()
@@ -269,16 +269,16 @@ class TestCLIStateMachineDocGenerated:
         db = Database(str(temp_dir / "docgap.sqlite"))
         run_id = db.insert_run({"status": "completed"})
         db.insert_commit({
-            "run_id": run_id, "hash": "docgen1", "status": "doc_generated",
+            "run_id": run_id, "hash": "d0c6e001", "status": "doc_generated",
             "author": "A", "email": "a@a", "date": "2026-04-03",
             "subject": "test with docs", "files": [],
         })
         db.close()
-        result = runner.invoke(main, ["--config", str(config_path), "review", "approve", "docgen1"])
+        result = runner.invoke(main, ["--config", str(config_path), "review", "approve", "d0c6e001"])
         assert result.exit_code == 0
         assert "approved" in result.output.lower()
         db = Database(str(temp_dir / "docgap.sqlite"))
-        commit = db.get_commit_by_hash("docgen1")
+        commit = db.get_commit_by_hash("d0c6e001")
         assert commit["status"] == "reviewed"
         db.close()
 
@@ -292,18 +292,18 @@ class TestCLIStateMachineDocGenerated:
         db = Database(str(temp_dir / "docgap.sqlite"))
         run_id = db.insert_run({"status": "completed"})
         db.insert_commit({
-            "run_id": run_id, "hash": "docgen2", "status": "doc_generated",
+            "run_id": run_id, "hash": "d0c6e002", "status": "doc_generated",
             "author": "A", "email": "a@a", "date": "2026-04-03",
             "subject": "test with docs", "files": [],
         })
         db.close()
         result = runner.invoke(main, [
-            "--config", str(config_path), "review", "reject", "docgen2",
+            "--config", str(config_path), "review", "reject", "d0c6e002",
             "--reason", "not needed",
         ])
         assert result.exit_code == 0
         db = Database(str(temp_dir / "docgap.sqlite"))
-        commit = db.get_commit_by_hash("docgen2")
+        commit = db.get_commit_by_hash("d0c6e002")
         assert commit["status"] == "false_positive"
         assert commit["feedback"] == "not needed"
         db.close()
@@ -318,17 +318,17 @@ class TestCLIStateMachineDocGenerated:
         db = Database(str(temp_dir / "docgap.sqlite"))
         run_id = db.insert_run({"status": "completed"})
         db.insert_commit({
-            "run_id": run_id, "hash": "uncertain1", "status": "uncertain",
+            "run_id": run_id, "hash": "ce17a001", "status": "uncertain",
             "author": "A", "email": "a@a", "date": "2026-04-03",
             "subject": "maybe needs docs", "files": [],
         })
         db.close()
         result = runner.invoke(main, [
-            "--config", str(config_path), "review", "reject", "uncertain1",
+            "--config", str(config_path), "review", "reject", "ce17a001",
         ])
         assert result.exit_code == 0
         db = Database(str(temp_dir / "docgap.sqlite"))
-        commit = db.get_commit_by_hash("uncertain1")
+        commit = db.get_commit_by_hash("ce17a001")
         assert commit["status"] == "false_positive"
         db.close()
 
@@ -342,12 +342,12 @@ class TestCLIStateMachineDocGenerated:
         db = Database(str(temp_dir / "docgap.sqlite"))
         run_id = db.insert_run({"status": "completed"})
         db.insert_commit({
-            "run_id": run_id, "hash": "alreadydone", "status": "reviewed",
+            "run_id": run_id, "hash": "a1ead0e0", "status": "reviewed",
             "author": "A", "email": "a@a", "date": "2026-04-03",
             "subject": "already done", "files": [],
         })
         db.close()
-        result = runner.invoke(main, ["--config", str(config_path), "review", "approve", "alreadydone"])
+        result = runner.invoke(main, ["--config", str(config_path), "review", "approve", "a1ead0e0"])
         assert result.exit_code != 0 or "cannot approve" in result.output.lower()
 
     def test_approve_with_reviewer_option(self, temp_dir):
@@ -360,18 +360,18 @@ class TestCLIStateMachineDocGenerated:
         db = Database(str(temp_dir / "docgap.sqlite"))
         run_id = db.insert_run({"status": "completed"})
         db.insert_commit({
-            "run_id": run_id, "hash": "reviewer1", "status": "doc_generated",
+            "run_id": run_id, "hash": "e1e0e001", "status": "doc_generated",
             "author": "A", "email": "a@a", "date": "2026-04-03",
             "subject": "test reviewer", "files": [],
         })
         db.close()
         result = runner.invoke(main, [
             "--config", str(config_path), "review", "approve",
-            "--reviewer", "john_doe", "reviewer1",
+            "--reviewer", "john_doe", "e1e0e001",
         ])
         assert result.exit_code == 0
         db = Database(str(temp_dir / "docgap.sqlite"))
-        commit = db.get_commit_by_hash("reviewer1")
+        commit = db.get_commit_by_hash("e1e0e001")
         assert commit["reviewer"] == "john_doe"
         assert commit["reviewed_at"] is not None
         db.close()
@@ -386,18 +386,18 @@ class TestCLIStateMachineDocGenerated:
         db = Database(str(temp_dir / "docgap.sqlite"))
         run_id = db.insert_run({"status": "completed"})
         db.insert_commit({
-            "run_id": run_id, "hash": "reviewer2", "status": "needs_doc",
+            "run_id": run_id, "hash": "e1e0e002", "status": "needs_doc",
             "author": "A", "email": "a@a", "date": "2026-04-03",
             "subject": "test reviewer reject", "files": [],
         })
         db.close()
         result = runner.invoke(main, [
             "--config", str(config_path), "review", "reject",
-            "--reviewer", "jane_doe", "--reason", "not needed", "reviewer2",
+            "--reviewer", "jane_doe", "--reason", "not needed", "e1e0e002",
         ])
         assert result.exit_code == 0
         db = Database(str(temp_dir / "docgap.sqlite"))
-        commit = db.get_commit_by_hash("reviewer2")
+        commit = db.get_commit_by_hash("e1e0e002")
         assert commit["reviewer"] == "jane_doe"
         assert commit["feedback"] == "not needed"
         db.close()
@@ -415,12 +415,12 @@ class TestCLILogFilters:
         db = Database(str(temp_dir / "docgap.sqlite"))
         run_id = db.insert_run({"status": "completed"})
         db.insert_commit({
-            "run_id": run_id, "hash": "log1", "status": "needs_doc",
+            "run_id": run_id, "hash": "10910001", "status": "needs_doc",
             "author": "A", "email": "a@a", "date": "2026-04-03",
             "subject": "filtered commit", "files": [],
         })
         db.insert_commit({
-            "run_id": run_id, "hash": "log2", "status": "irrelevant",
+            "run_id": run_id, "hash": "10910002", "status": "irrelevant",
             "author": "B", "email": "b@b", "date": "2026-04-03",
             "subject": "other commit", "files": [],
         })
@@ -429,7 +429,7 @@ class TestCLILogFilters:
             main, ["--config", str(config_path), "log", "--status", "needs_doc"]
         )
         assert result.exit_code == 0
-        assert "filtered commit" in result.output.lower() or "log1" in result.output
+        assert "filtered commit" in result.output.lower() or "10910001" in result.output
 
 
 class TestCLIConfigShowError:
@@ -475,16 +475,16 @@ class TestCLIReviewShowWithFiles:
         db = Database(str(temp_dir / "docgap.sqlite"))
         run_id = db.insert_run({"status": "completed"})
         db.insert_commit({
-            "run_id": run_id, "hash": "show1", "status": "needs_doc",
+            "run_id": run_id, "hash": "5b011111", "status": "needs_doc",
             "author": "A", "email": "a@a", "date": "2026-04-03",
             "subject": "test commit", "files": [],
             "classification": "NEEDS_DOC", "confidence": 0.85,
             "category": "new_flag", "reasoning": "Added flag",
         })
         db.close()
-        result = runner.invoke(main, ["--config", str(config_path), "review", "show", "show1"])
+        result = runner.invoke(main, ["--config", str(config_path), "review", "show", "5b011111"])
         assert result.exit_code == 0
-        assert "show1" in result.output
+        assert "5b011111" in result.output
         assert "NEEDS_DOC" in result.output
 
     def test_review_show_commit_not_found(self, temp_dir):
@@ -492,7 +492,7 @@ class TestCLIReviewShowWithFiles:
         config_path = temp_dir / "config.yaml"
         _create_test_config(config_path, str(temp_dir))
         runner.invoke(main, ["--config", str(config_path), "init"])
-        result = runner.invoke(main, ["--config", str(config_path), "review", "show", "nonexistent"])
+        result = runner.invoke(main, ["--config", str(config_path), "review", "show", "404e0000"])
         assert "not found" in result.output.lower()
 
 
@@ -638,18 +638,18 @@ class TestCLIBulkApproval:
         db = Database(str(temp_dir / "docgap.sqlite"))
         run_id = db.insert_run({"status": "completed"})
         db.insert_commit({
-            "run_id": run_id, "hash": "showfiles", "status": "needs_doc",
+            "run_id": run_id, "hash": "5b04f11e", "status": "needs_doc",
             "author": "A", "email": "a@a", "date": "2026-04-03",
             "subject": "test", "files": [],
             "reasoning": "Added stuff",
         })
         db.close()
         # Create output files
-        output_dir = temp_dir / "output" / "showfiles"
+        output_dir = temp_dir / "output" / "5b04f11e"
         output_dir.mkdir(parents=True)
         (output_dir / "report.txt").write_text("This is the report content")
         (output_dir / "manpage.patch").write_text("--- a/file\n+++ b/file\n")
-        result = runner.invoke(main, ["--config", str(config_path), "review", "show", "showfiles"])
+        result = runner.invoke(main, ["--config", str(config_path), "review", "show", "5b04f11e"])
         assert result.exit_code == 0
         assert "report" in result.output.lower()
         assert "patch" in result.output.lower()
@@ -658,7 +658,7 @@ class TestCLIBulkApproval:
         runner = CliRunner()
         config_path = temp_dir / "config.yaml"
         _create_test_config(config_path, str(temp_dir))
-        result = runner.invoke(main, ["--config", str(config_path), "review", "show", "abc"])
+        result = runner.invoke(main, ["--config", str(config_path), "review", "show", "abc0"])
         assert "not initialized" in result.output.lower()
 
 
@@ -690,7 +690,7 @@ class TestCLIReviewList:
         db = Database(str(temp_dir / "docgap.sqlite"))
         run_id = db.insert_run({"status": "completed"})
         db.insert_commit({
-            "run_id": run_id, "hash": "revlist1", "status": "needs_doc",
+            "run_id": run_id, "hash": "e1157001", "status": "needs_doc",
             "author": "A", "email": "a@a", "date": "2026-04-03",
             "subject": "test review list", "files": [],
             "classification": "NEEDS_DOC", "confidence": 0.9,
@@ -699,7 +699,7 @@ class TestCLIReviewList:
         db.close()
         result = runner.invoke(main, ["--config", str(config_path), "review", "list"])
         assert result.exit_code == 0
-        assert "revlist1" in result.output
+        assert "e1157001" in result.output
 
 
 class TestCLIReviewApproveReject:
@@ -709,7 +709,7 @@ class TestCLIReviewApproveReject:
         runner = CliRunner()
         config_path = temp_dir / "config.yaml"
         _create_test_config(config_path, str(temp_dir))
-        result = runner.invoke(main, ["--config", str(config_path), "review", "approve", "abc"])
+        result = runner.invoke(main, ["--config", str(config_path), "review", "approve", "abc0"])
         assert "not initialized" in result.output.lower()
 
     def test_approve_commit_not_found(self, temp_dir):
@@ -717,14 +717,14 @@ class TestCLIReviewApproveReject:
         config_path = temp_dir / "config.yaml"
         _create_test_config(config_path, str(temp_dir))
         runner.invoke(main, ["--config", str(config_path), "init"])
-        result = runner.invoke(main, ["--config", str(config_path), "review", "approve", "nonexistent"])
+        result = runner.invoke(main, ["--config", str(config_path), "review", "approve", "404e0000"])
         assert "not found" in result.output.lower()
 
     def test_reject_no_db(self, temp_dir):
         runner = CliRunner()
         config_path = temp_dir / "config.yaml"
         _create_test_config(config_path, str(temp_dir))
-        result = runner.invoke(main, ["--config", str(config_path), "review", "reject", "abc"])
+        result = runner.invoke(main, ["--config", str(config_path), "review", "reject", "abc0"])
         assert "not initialized" in result.output.lower()
 
     def test_reject_commit_not_found(self, temp_dir):
@@ -732,7 +732,7 @@ class TestCLIReviewApproveReject:
         config_path = temp_dir / "config.yaml"
         _create_test_config(config_path, str(temp_dir))
         runner.invoke(main, ["--config", str(config_path), "init"])
-        result = runner.invoke(main, ["--config", str(config_path), "review", "reject", "nonexistent"])
+        result = runner.invoke(main, ["--config", str(config_path), "review", "reject", "404e0000"])
         assert "not found" in result.output.lower()
 
     def test_reject_without_reason(self, temp_dir):
@@ -744,15 +744,15 @@ class TestCLIReviewApproveReject:
         db = Database(str(temp_dir / "docgap.sqlite"))
         run_id = db.insert_run({"status": "completed"})
         db.insert_commit({
-            "run_id": run_id, "hash": "rejnoreason", "status": "needs_doc",
+            "run_id": run_id, "hash": "e370ea50", "status": "needs_doc",
             "author": "A", "email": "a@a", "date": "2026-04-03",
             "subject": "test", "files": [],
         })
         db.close()
-        result = runner.invoke(main, ["--config", str(config_path), "review", "reject", "rejnoreason"])
+        result = runner.invoke(main, ["--config", str(config_path), "review", "reject", "e370ea50"])
         assert result.exit_code == 0
         db = Database(str(temp_dir / "docgap.sqlite"))
-        commit = db.get_commit_by_hash("rejnoreason")
+        commit = db.get_commit_by_hash("e370ea50")
         assert commit["status"] == "false_positive"
         assert commit.get("feedback") is None
         db.close()
@@ -1032,7 +1032,7 @@ class TestCLIReviewShowError:
         _create_test_config(config_path, str(temp_dir))
         from unittest.mock import patch
         with patch("docgap.cli.commands.get_config", side_effect=Exception("broken")):
-            result = runner.invoke(main, ["--config", str(config_path), "review", "show", "abc"])
+            result = runner.invoke(main, ["--config", str(config_path), "review", "show", "abc0"])
         assert "error" in result.output.lower()
 
 
@@ -1045,7 +1045,7 @@ class TestCLIReviewApproveError:
         _create_test_config(config_path, str(temp_dir))
         from unittest.mock import patch
         with patch("docgap.cli.commands.get_config", side_effect=Exception("broken")):
-            result = runner.invoke(main, ["--config", str(config_path), "review", "approve", "abc"])
+            result = runner.invoke(main, ["--config", str(config_path), "review", "approve", "abc0"])
         assert "error" in result.output.lower()
 
 
@@ -1058,7 +1058,7 @@ class TestCLIReviewRejectError:
         _create_test_config(config_path, str(temp_dir))
         from unittest.mock import patch
         with patch("docgap.cli.commands.get_config", side_effect=Exception("broken")):
-            result = runner.invoke(main, ["--config", str(config_path), "review", "reject", "abc"])
+            result = runner.invoke(main, ["--config", str(config_path), "review", "reject", "abc0"])
         assert "error" in result.output.lower()
 
 

@@ -1,5 +1,6 @@
 """Log parser for extracting commit metadata from git log output."""
 import json
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -68,13 +69,16 @@ class LogParser:
         if len(parts) < 5:
             return None
         
-        return {
+        result = {
             'hash': parts[0],
             'author': parts[1],
             'email': parts[2],
             'date': parts[3],
             'subject': parts[4],
         }
+        if not re.fullmatch(r"[0-9a-fA-F]{4,64}", result.get('hash', '')):
+            return None
+        return result
     
     def _get_files_for_commit(self, commit_hash: str, repo_path: Optional[Path] = None) -> List[str]:
         """Get the list of files changed in a commit."""
@@ -82,7 +86,7 @@ class LogParser:
             cwd = str(repo_path) if repo_path else str(self.git_fetcher.src_path)
             result = subprocess.run(
                 ['git', '-c', f'safe.directory={cwd}',
-                 'diff-tree', '--no-commit-id', '--name-only', '-r', commit_hash],
+                 'diff-tree', '--no-commit-id', '--name-only', '-r', commit_hash, '--'],
                 cwd=cwd,
                 capture_output=True,
                 text=True,
@@ -109,6 +113,9 @@ class LogParser:
         Returns:
             List of commit dictionaries with metadata and files
         """
+        if not re.fullmatch(r"[a-zA-Z0-9_./-]+", branch):
+            raise ValueError(f"Invalid branch name: {branch}")
+
         # Build git log command
         src_path = str(self.git_fetcher.src_path)
         cmd = ['git', '-c', f'safe.directory={src_path}', '-C', src_path, 'log']
@@ -217,7 +224,8 @@ class LogParser:
                 commit['skip_reason'] = reason
                 commit['filtered'] = True
                 self._stats['filtered_out'] += 1
-                self._stats[f'{reason}_skipped'] += 1
+                stat_key = f'{reason}_skipped'
+                self._stats[stat_key] = self._stats.get(stat_key, 0) + 1
             else:
                 commit['filtered'] = False
                 self._stats['accepted'] += 1

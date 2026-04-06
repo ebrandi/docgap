@@ -153,7 +153,7 @@ class TestOutputManagerLoadNotFound:
 
     def test_load_output_not_found(self, temp_dir, test_config):
         manager = OutputManager(config=test_config)
-        result = manager.load_output("nonexistent_hash")
+        result = manager.load_output("a1b2c3d4e5f6")
         assert result is None
 
 
@@ -215,8 +215,9 @@ class TestOutputManagerRotateOutputs:
             report = "test report"
 
         gen = _GenResult()
-        for i in range(5):
-            manager.save_output(f"hash{i:04d}", gen, classification)
+        hex_hashes = ["aa000000", "bb000001", "cc000002", "dd000003", "ee000004"]
+        for h in hex_hashes:
+            manager.save_output(h, gen, classification)
         rotated = manager.rotate_outputs(max_outputs=3)
         assert rotated >= 2
 
@@ -243,7 +244,7 @@ class TestOutputManagerGetTotalSize:
             patch = "--- a/f\n+++ b/f\n"
             report = "test report"
 
-        manager.save_output("sizehash", _GenResult(), classification)
+        manager.save_output("517e4a5b", _GenResult(), classification)
         size = manager._get_total_size_mb()
         assert size > 0.0
 
@@ -301,8 +302,9 @@ class TestOutputManagerRotateBySize:
             patch = "x" * 10000
             report = "y" * 10000
 
-        for i in range(5):
-            manager.save_output(f"sizehash{i:04d}", _GenResult(), classification)
+        hex_hashes = ["517e4a00", "517e4a01", "517e4a02", "517e4a03", "517e4a04"]
+        for h in hex_hashes:
+            manager.save_output(h, _GenResult(), classification)
 
         # Rotate with very small limit to force rotation
         rotated = manager.rotate_outputs(max_outputs=1000, max_size_mb=0)
@@ -343,10 +345,10 @@ class TestOutputManagerSaveWithValidation:
             errors = ["error1"]
             warnings = ["warn1"]
 
-        saved = manager.save_output("valhash", _GenResult(), classification, _ValResult())
+        saved = manager.save_output("7a1b2c3d", _GenResult(), classification, _ValResult())
         assert "metadata.json" in saved
         # Load and check validation info
-        loaded = manager.load_output("valhash")
+        loaded = manager.load_output("7a1b2c3d")
         assert loaded is not None
 
 
@@ -368,7 +370,7 @@ class TestOutputManagerPatchNaming:
             report = "test report"
             format = "mdoc"
 
-        saved = manager.save_output("mdochash", _GenResult(), classification)
+        saved = manager.save_output("6d0c4a5b", _GenResult(), classification)
         assert "manpage.patch" in saved
 
     def test_asciidoc_saves_as_handbook_patch(self, temp_dir, test_config):
@@ -386,7 +388,7 @@ class TestOutputManagerPatchNaming:
             report = "test report"
             format = "asciidoc"
 
-        saved = manager.save_output("adochash", _GenResult(), classification)
+        saved = manager.save_output("add0c4a5", _GenResult(), classification)
         assert "handbook.patch" in saved
 
     def test_load_output_finds_handbook_patch(self, temp_dir, test_config):
@@ -404,8 +406,8 @@ class TestOutputManagerPatchNaming:
             report = "test report"
             format = "asciidoc"
 
-        manager.save_output("loadhbhash", _GenResult(), classification)
-        loaded = manager.load_output("loadhbhash")
+        manager.save_output("10adb4a5", _GenResult(), classification)
+        loaded = manager.load_output("10adb4a5")
         assert loaded is not None
         assert loaded.get("patch_filename") == "handbook.patch"
 
@@ -424,5 +426,51 @@ class TestOutputManagerPatchNaming:
             patch = "--- a/f\n+++ b/f\n"
             report = "test report"
 
-        saved = manager.save_output("nofmthash", _GenResult(), classification)
+        saved = manager.save_output("0f6d4a5b", _GenResult(), classification)
         assert "manpage.patch" in saved
+
+
+class TestOutputManagerHashValidation:
+    """Test that _get_output_dir and _get_output_dir_flat reject invalid hashes."""
+
+    def test_get_output_dir_path_traversal_raises(self, temp_dir, test_config):
+        """_get_output_dir raises ValueError for a hash containing path traversal."""
+        manager = OutputManager(config=test_config)
+        with pytest.raises(ValueError, match="Invalid commit hash"):
+            manager._get_output_dir("../../etc")
+
+    def test_get_output_dir_absolute_path_raises(self, temp_dir, test_config):
+        """_get_output_dir raises ValueError for an absolute path hash."""
+        manager = OutputManager(config=test_config)
+        with pytest.raises(ValueError, match="Invalid commit hash"):
+            manager._get_output_dir("/etc/passwd")
+
+    def test_get_output_dir_non_hex_raises(self, temp_dir, test_config):
+        """_get_output_dir raises ValueError for a hash with non-hex characters."""
+        manager = OutputManager(config=test_config)
+        with pytest.raises(ValueError, match="Invalid commit hash"):
+            manager._get_output_dir("gggggggg")
+
+    def test_get_output_dir_flat_path_traversal_raises(self, temp_dir, test_config):
+        """_get_output_dir_flat raises ValueError for a hash containing path traversal."""
+        manager = OutputManager(config=test_config)
+        with pytest.raises(ValueError, match="Invalid commit hash"):
+            manager._get_output_dir_flat("../../etc")
+
+    def test_get_output_dir_flat_absolute_path_raises(self, temp_dir, test_config):
+        """_get_output_dir_flat raises ValueError for an absolute path hash."""
+        manager = OutputManager(config=test_config)
+        with pytest.raises(ValueError, match="Invalid commit hash"):
+            manager._get_output_dir_flat("/etc/passwd")
+
+    def test_get_output_dir_valid_hash_succeeds(self, temp_dir, test_config):
+        """_get_output_dir returns a valid path for a proper hex hash."""
+        manager = OutputManager(config=test_config)
+        path = manager._get_output_dir("abc123def456")
+        assert "abc123def456" in str(path)
+
+    def test_get_output_dir_flat_valid_hash_succeeds(self, temp_dir, test_config):
+        """_get_output_dir_flat returns a valid path for a proper hex hash."""
+        manager = OutputManager(config=test_config)
+        path = manager._get_output_dir_flat("abc123def456")
+        assert str(path).endswith("abc123def456")

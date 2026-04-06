@@ -2,6 +2,7 @@
 import json
 import logging
 import time
+import urllib.parse
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -43,6 +44,12 @@ class OllamaClient:
             log_requests: Whether to log requests at DEBUG level
         """
         self.base_url = base_url.rstrip('/')
+        parsed = urllib.parse.urlparse(self.base_url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
+        blocked_hosts = {"169.254.169.254", "metadata.google.internal"}
+        if parsed.hostname in blocked_hosts:
+            raise ValueError("Cloud metadata endpoints are not allowed as LLM base_url")
         self.model = model
         self.timeout = timeout
         self.connect_timeout = connect_timeout

@@ -17,11 +17,11 @@ from docgap.git.fetcher import GitFetcher
 from docgap.git.parser import LogParser
 from docgap.llm.client import OllamaClient
 
-FREEBSD_SRC = "/home/ebrandi/projects/freebsd-src"
-FREEBSD_DOC = "/home/ebrandi/projects/freebsd-doc"
+FREEBSD_SRC = "/tmp/freebsd-src"
+FREEBSD_DOC = "/tmp/freebsd-doc"
 OLLAMA_LOCAL_URL = "http://localhost:11434"
-OLLAMA_REMOTE_URL = "http://ai.ebrandi.eti.br:11434"
-OLLAMA_MODEL = "qwen3.5:122b-96g-128k"
+OLLAMA_REMOTE_URL = "http://192.168.50.9:11434"
+OLLAMA_MODEL = "qwen3-coder-next-512k:latest"
 
 
 def _find_ollama_url() -> str:
@@ -53,8 +53,8 @@ def git_fetcher():
         src_path=FREEBSD_SRC,
         doc_path=FREEBSD_DOC,
         bare=False,
-        timeout=60,
-        max_retries=1,
+        timeout=120,
+        max_retries=2,
     )
 
 
@@ -70,7 +70,7 @@ def ollama_client(ollama_url):
     return OllamaClient(
         base_url=ollama_url,
         model=OLLAMA_MODEL,
-        timeout=300,
+        timeout=1200,
         connect_timeout=10,
         max_retries=1,
     )
@@ -101,7 +101,7 @@ llm:
   model: {OLLAMA_MODEL}
   temperature: 0.1
   max_context: 131072
-  timeout: 300
+  timeout: 1200
 
 detection:
   confidence_threshold_accept: 0.80

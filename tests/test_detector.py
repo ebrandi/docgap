@@ -385,3 +385,50 @@ class TestClassificationApplyThresholds:
         applied = result.apply_thresholds(0.80, 0.50)
         assert applied.classification == Classification.UNCERTAIN
         assert "below accept threshold" in applied.reasoning
+
+
+class TestDetectorDocTargetSanitization:
+    """Test that _parse_llm_response sanitizes doc_target to prevent path traversal."""
+
+    def _make_detector(self, temp_dir, test_config):
+        mock_client = MagicMock()
+        mock_fetcher = MagicMock()
+        return Stage1Detector(
+            llm_client=mock_client,
+            git_fetcher=mock_fetcher,
+            config=test_config,
+        )
+
+    def test_path_traversal_doc_target_returns_none(self, temp_dir, test_config):
+        """_parse_llm_response sets doc_target to None when it contains '..'."""
+        detector = self._make_detector(temp_dir, test_config)
+        result = detector._parse_llm_response(
+            '{"classification": "NEEDS_DOC", "confidence": 0.85, "doc_target": "../../etc/passwd"}'
+        )
+        assert result.doc_target is None
+
+    def test_absolute_path_doc_target_returns_none(self, temp_dir, test_config):
+        """_parse_llm_response sets doc_target to None when it is an absolute path."""
+        detector = self._make_detector(temp_dir, test_config)
+        result = detector._parse_llm_response(
+            '{"classification": "NEEDS_DOC", "confidence": 0.85, "doc_target": "/etc/passwd"}'
+        )
+        assert result.doc_target is None
+
+    def test_valid_relative_doc_target_preserved(self, temp_dir, test_config):
+        """_parse_llm_response preserves a safe relative doc_target."""
+        detector = self._make_detector(temp_dir, test_config)
+        result = detector._parse_llm_response(
+            '{"classification": "NEEDS_DOC", "confidence": 0.85, "doc_target": "usr.bin/ls/ls.1"}'
+        )
+        assert result.doc_target == "usr.bin/ls/ls.1"
+
+    def test_overlong_doc_target_truncated(self, temp_dir, test_config):
+        """_parse_llm_response truncates doc_target longer than 500 characters."""
+        detector = self._make_detector(temp_dir, test_config)
+        long_target = "a" * 600
+        result = detector._parse_llm_response(
+            f'{{"classification": "NEEDS_DOC", "confidence": 0.85, "doc_target": "{long_target}"}}'
+        )
+        assert result.doc_target is not None
+        assert len(result.doc_target) <= 500
