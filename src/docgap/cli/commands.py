@@ -396,7 +396,7 @@ def init_command(cli_obj) -> int:
         return 1
 
 
-def report_command(cli_obj, output_format: str = "txt") -> int:
+def report_command(cli_obj, output_format: str = "txt", output_file: Optional[str] = None, save: bool = False) -> int:
     """Generate documentation reports."""
     try:
         config = get_config(cli_obj)
@@ -416,20 +416,62 @@ def report_command(cli_obj, output_format: str = "txt") -> int:
             status_counts[status] = count
             total += count
 
+        # Get last run info
+        last_run = db.get_last_successful_run()
+        timestamp = datetime.now(timezone.utc).isoformat()
+
         if output_format == "json":
-            click.echo(json.dumps({"status_counts": status_counts, "total": total}))
+            report_data = {
+                "generated_at": timestamp,
+                "status_counts": status_counts,
+                "total": total,
+                "last_run": {
+                    "started_at": last_run.get("started_at") if last_run else None,
+                    "finished_at": last_run.get("finished_at") if last_run else None,
+                    "status": last_run.get("status") if last_run else None,
+                    "commits_processed": last_run.get("commits_processed", 0) if last_run else 0,
+                    "commits_flagged": last_run.get("commits_flagged", 0) if last_run else 0,
+                },
+            }
+            content = json.dumps(report_data, indent=2)
         else:
-            click.echo("=== docgap Report ===")
-            click.echo()
-            click.echo("Commit Statistics:")
+            lines = []
+            lines.append("=== docgap Report ===")
+            lines.append(f"Generated: {timestamp}")
+            lines.append("")
+            if last_run:
+                lines.append(f"Last run: {last_run.get('started_at', 'N/A')} ({last_run.get('status', 'N/A')})")
+                lines.append(f"  Processed: {last_run.get('commits_processed', 0)}, Flagged: {last_run.get('commits_flagged', 0)}")
+                lines.append("")
+            lines.append("Commit Statistics:")
             for status, count in status_counts.items():
                 if count > 0:
-                    click.echo(f"  {status}: {count}")
-            click.echo(f"  Total: {total}")
-            click.echo()
-            click.echo("For detailed reports, use:")
-            click.echo("  docgap review list")
-            click.echo("  docgap log")
+                    lines.append(f"  {status}: {count}")
+            lines.append(f"  Total: {total}")
+            lines.append("")
+            lines.append("For detailed reports, use:")
+            lines.append("  docgap review list")
+            lines.append("  docgap log")
+            content = "\n".join(lines)
+
+        # Print to stdout
+        click.echo(content)
+
+        # Determine output file path
+        dest = None
+        if output_file:
+            dest = Path(output_file)
+        elif save:
+            reports_dir = Path(config.general.data_dir) / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            ext = "json" if output_format == "json" else "txt"
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            dest = reports_dir / f"report-{ts}.{ext}"
+
+        if dest:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content + "\n")
+            click.echo(f"\nReport saved to: {dest}")
 
         return 0
 

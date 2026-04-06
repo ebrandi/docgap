@@ -167,10 +167,12 @@ def init(ctx):
 
 @main.command()
 @click.option("--format", "output_format", type=click.Choice(["txt", "json"]), default="txt", help="Output format (txt or json)")
+@click.option("--output", "output_file", default=None, help="Save report to this file path")
+@click.option("--save", is_flag=True, help="Save report to {data_dir}/reports/ with timestamp")
 @click.pass_context
-def report(ctx, output_format):
+def report(ctx, output_format, output_file, save):
     """Generate documentation reports."""
-    report_command(ctx.obj, output_format=output_format)
+    report_command(ctx.obj, output_format=output_format, output_file=output_file, save=save)
 
 
 @main.command()
